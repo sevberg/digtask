@@ -1,12 +1,10 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use anyhow::{anyhow, bail, Result};
 
 use serde_json::Value as JsonValue;
-use winnow::combinator::{alt, delimited, dispatch, eof, fail, peek, seq};
-use winnow::stream::AsBStr;
-use winnow::token::{any, one_of, take_till, take_until};
-use winnow::token::{take, take_while};
+use winnow::combinator::{alt, delimited};
+use winnow::token::{any, take_till, take_until, take_while};
 use winnow::{PResult, Parser};
 
 use crate::vars::{VariableMapStack, VariableMapStackTrait};
@@ -37,29 +35,14 @@ fn parse_comment<'s>(input: &mut &'s str) -> PResult<ParsedElement<'s>> {
 }
 
 fn parse_literal<'s>(input: &mut &'s str) -> PResult<ParsedElement<'s>> {
-    // alt(none_of(literal("literal"), literal("literal"))).parse_next(input)
-    // let output = take_till(1.., is_control_char).parse_next(input)?;
-    // let output = take(2usize).parse_next(input)?;
-    // let output = take(2usize).parse_peek(input)?;
-    // let output = take_until(1.., "{{").parse_next(input);
-
-    // let first_char = any.parse_next(input)?;
-    // let remaining_output = take_till(0.., is_control_char).parse_next(input)?;
-    // let x = remaining_output.chars();
-    // let x = first_char + x;
     let stored_input = *input;
     let (_, remainder) = (any, take_till(0.., is_control_char)).parse_next(input)?;
-    // let mut output = String::new();
 
     let total_length = 1 + remainder.len();
     let output = &stored_input[..total_length];
     Ok(ParsedElement::Literal(output))
 }
-// fn parse_control_char_literal<'s>(input: &mut &'s str) -> PResult<ParsedElement<'s>> {
-//     // alt(none_of(literal("literal"), literal("literal"))).parse_next(input)
-//     let output = one_of(['{', '/']).parse_next(input)?;
-//     Ok(ParsedElement::Literal( .to_string()))
-// }
+
 fn parse_element<'s>(input: &mut &'s str) -> PResult<ParsedElement<'s>> {
     let output = alt((parse_token, parse_comment, parse_literal)).parse_next(input);
     output
@@ -74,27 +57,6 @@ fn parse_all_elements<'s>(input: &'s str) -> PResult<Vec<ParsedElement<'s>>> {
     }
     Ok(output)
 }
-
-// pub type VariableMapStack<'a> = Vec<&'a HashMap<String, JsonValue>>;
-// pub trait VariableMapStackTrait {
-//     // blahhhh
-//     fn get_key(&self, key: &str) -> Result<&JsonValue>;
-// }
-
-// impl<'s> VariableMapStackTrait for VariableMapStack<'s> {
-//     // blloooo
-//     fn get_key(&self, key: &str) -> Result<&'s JsonValue> {
-//         for vars in self.iter().rev() {
-//             match vars.get(key) {
-//                 Some(value) => {
-//                     return Ok(value);
-//                 }
-//                 None => (),
-//             }
-//         }
-//         Err(anyhow!("Failed to insert key '{}'", key))
-//     }
-// }
 
 fn evaluate_tokens(input: &str, var_stack: &Vec<&HashMap<String, JsonValue>>) -> Result<JsonValue> {
     // Begin Parsing
@@ -183,6 +145,8 @@ mod test {
 
     use serde_json::json;
 
+    use crate::vars::{no_vars, VariableMap};
+
     use super::*;
 
     #[test]
@@ -252,37 +216,24 @@ print(json.dumps({ \"bob\": math.sqrt( 3.0 )}))"
         Ok(())
     }
 
-    // #[test]
-    // fn evaluate_without_vars() -> Result<()> {
-    //     let token = Token("just a string".to_string());
-    //     let output = token.evaluate(NO_VARS)?;
+    #[test]
+    fn evaluate_without_vars() -> Result<()> {
+        let input = json!["just a string"];
+        let output = input.evaluate_tokens(&no_vars())?;
 
-    //     assert_eq!(output, token.0);
-    //     Ok(())
-    // }
+        assert_eq!(output, input);
+        Ok(())
+    }
 
-    // #[test]
-    // fn evaluate_with_explicit_vars() -> Result<()> {
-    //     let mut varmap = VariableMap::new();
-    //     varmap.insert("whatami".into(), "tea pot".into());
+    #[test]
+    fn evaluate_with_explicit_vars() -> Result<()> {
+        let mut varmap = VariableMap::new();
+        varmap.insert("whatami".into(), "tea pot".into());
 
-    //     let token: Token = "I am a {{whatami}}".into();
-    //     let output = token.evaluate(varmap.as_option())?;
+        let token = json!["I am a {{whatami}}"];
+        let output = token.evaluate_tokens(&vec![&varmap])?;
 
-    //     assert_eq!(output, "I am a tea pot".to_string());
-    //     Ok(())
-    // }
-
-    // #[test]
-    // fn evaluate_with_referenced_vars() -> Result<()> {
-    //     let var_value = "tea pot".into();
-    //     let mut varmap = ReferenceVariableMap::new();
-    //     varmap.insert("whatami".into(), &var_value);
-
-    //     let token: Token = "I am a {{whatami}}".into();
-    //     let output = token.evaluate(varmap.as_option())?;
-
-    //     assert_eq!(output, "I am a tea pot".to_string());
-    //     Ok(())
-    // }
+        assert_eq!(output, "I am a tea pot".to_string());
+        Ok(())
+    }
 }
