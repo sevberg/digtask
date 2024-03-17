@@ -1,4 +1,4 @@
-// use crate::step::common::{StepConfig, StepEvaluationResult};
+use crate::step::common::{StepConfig, StepEvaluationResult};
 use crate::token::TokenedJsonValue;
 use anyhow::{anyhow, bail, Error, Result};
 use indexmap::IndexMap;
@@ -34,19 +34,19 @@ impl<'s> VariableMapStackTrait for VariableMapStack<'s> {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum RawVariable {
-    // Executable(StepConfig),
+    Executable(StepConfig),
     Json(JsonValue),
 }
 
 impl RawVariable {
     pub fn evaluate(&self, var_stack: &VariableMapStack) -> Result<JsonValue> {
         let output = match &self {
-            RawVariable::Json(json_value) => json_value.evaluate_tokens(var_stack),
-            // RawVariable::Executable(command) => match command.evaluate(var_stack)? {
-            //     StepEvaluationResult::CompletedWithOutput(val) => val,
-            //     _ => bail!("Command did not result in an output"),
-            // },
-        }?;
+            RawVariable::Json(json_value) => json_value.evaluate_tokens(var_stack)?,
+            RawVariable::Executable(command) => match command.evaluate(var_stack)? {
+                StepEvaluationResult::CompletedWithOutput(val) => val,
+                _ => bail!("Command did not result in an output"),
+            },
+        };
 
         Ok(output)
     }
@@ -87,7 +87,7 @@ impl RawVariableMapTrait for RawVariableMap {
 
 #[cfg(test)]
 mod test {
-    // use crate::step::python_step::PythonStep;
+    use crate::step::python_step::PythonStep;
 
     use super::*;
     use anyhow::anyhow;
@@ -163,23 +163,23 @@ mod test {
         Ok(())
     }
 
-    // #[test]
-    // fn test_command_var() -> Result<()> {
-    //     let mut rawvars = RawVariableMap::new();
-    //     rawvars.insert("fixed_key".into(), "dyn_key".into());
-    //     rawvars.insert(
-    //         "{{fixed_key}}".into(),
-    //         RawVariable::Executable(StepConfig::Python(PythonStep::new("print(\"19\")"))),
-    //     );
+    #[test]
+    fn test_command_var() -> Result<()> {
+        let mut rawvars = RawVariableMap::new();
+        rawvars.insert("fixed_key".into(), RawVariable::Json(json!["dyn_key"]));
+        rawvars.insert(
+            "{{fixed_key}}".into(),
+            RawVariable::Executable(StepConfig::Python(PythonStep::new("print(\"19\")"))),
+        );
 
-    //     let output = rawvars.evaluate(NO_VARS)?;
+        let output = rawvars.evaluate(&no_vars())?;
 
-    //     let value = output
-    //         .get("dyn_key")
-    //         .ok_or(anyhow!("Expected 'dyn_key' to be available"))?;
+        let value = output
+            .get("dyn_key")
+            .ok_or(anyhow!("Expected 'dyn_key' to be available"))?;
 
-    //     assert_eq!(value, &Variable::SingleInt(19));
+        assert_eq!(value, &json![19]);
 
-    //     Ok(())
-    // }
+        Ok(())
+    }
 }
