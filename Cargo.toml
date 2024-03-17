@@ -17,4 +17,4 @@ serde_yaml = "0.9.32"
 winnow = "0.6.5"
 
 [dev-dependencies]
-winnow = { version = "0.6.5", features = ["debug"] }
+winnow = { version = "0.6.5", features = [] }

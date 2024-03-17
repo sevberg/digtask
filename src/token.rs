@@ -98,6 +98,21 @@ fn evaluate_tokens(input: &str, var_stack: &Vec<&HashMap<String, JsonValue>>) ->
 
 pub trait TokenedJsonValue {
     fn evaluate_tokens(&self, var_stack: &VariableMapStack) -> Result<JsonValue>;
+    fn evaluate_tokens_to_string(
+        &self,
+        token_type: &str,
+        var_stack: &VariableMapStack,
+    ) -> Result<String> {
+        let output = match self.evaluate_tokens(var_stack)? {
+            JsonValue::String(val) => Ok(val),
+            other => Err(anyhow!(
+                "A {} must evaluate to a String. Got '{}'",
+                token_type,
+                other
+            )),
+        }?;
+        Ok(output)
+    }
 }
 
 impl TokenedJsonValue for String {

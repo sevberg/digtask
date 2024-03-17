@@ -1,5 +1,5 @@
 mod config;
-// mod step;
+mod step;
 // mod task;
 mod token;
 mod vars;
