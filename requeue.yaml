@@ -1,0 +1,52 @@
+version: '3'
+
+vars:
+  NAME: sevberg
+  COUNTRIES: [DEU, USA, CHN]
+  NUM: 3
+  NOW:
+    bash: date
+  SOME_NUM:
+    py: | 
+      import math
+      import json
+      print(json.dumps({ "{{NAME}}": math.sqrt( {{NUM}} )}))
+
+tasks:
+  prepare_country:
+    vars:
+      iso3: DEU
+    label: 'prepare_country[{{iso3}},{{NAME}}]'
+    steps:
+      - 'echo PREPARING: {{iso3}}'
+      - "echo $(pwd)"
+      - 'touch data/prepared_{{iso3}}-{{NAME}}.output'
+      # - command: touch data/prepared_{{iso3}}.csv
+      #   store: newvar
+    inputs:
+      - data/input_{{iso3}}.csv
+    outputs:
+      - data/prepared_{{iso3}}-{{NAME}}.output
+    forcing: Inherit
+
+  # analyze_country:
+  #   vars:
+  #     iso3: [USA, DOD]
+  #   label: 'analyze_country={{iso3}}'
+  #   steps:
+  #     - task: prepare_country
+  #       map_over: 
+  #         iso3: iso3
+  #         NAME: COUNTRIES
+  #     - 'echo "ANALYZING: {{iso3}}"'
+    # sources:
+    #   - data/prepared_{{iso3}}.csv
+    # generates:
+    #   - data/analyzed_{{iso3}}.csv
+  
+#   analyze_all:
+#     cmds:
+#       - for: { var: COUNTRIES }
+#         task: analyze_country
+#         vars:
+#           iso3: '{{.ITEM}}'
