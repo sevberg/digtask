@@ -1,6 +1,6 @@
 mod config;
 mod step;
-// mod task;
+mod task;
 mod token;
 mod vars;
 

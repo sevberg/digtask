@@ -1,4 +1,4 @@
-use crate::step::common::{StepConfig, StepEvaluationResult};
+use crate::step::common::{CommandConfig, StepEvaluationResult};
 use crate::token::TokenedJsonValue;
 use anyhow::{anyhow, bail, Error, Result};
 use indexmap::IndexMap;
@@ -34,7 +34,7 @@ impl<'s> VariableMapStackTrait for VariableMapStack<'s> {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum RawVariable {
-    Executable(StepConfig),
+    Executable(CommandConfig),
     Json(JsonValue),
 }
 
@@ -169,7 +169,7 @@ mod test {
         rawvars.insert("fixed_key".into(), RawVariable::Json(json!["dyn_key"]));
         rawvars.insert(
             "{{fixed_key}}".into(),
-            RawVariable::Executable(StepConfig::Python(PythonStep::new("print(\"19\")"))),
+            RawVariable::Executable(CommandConfig::Python(PythonStep::new("print(\"19\")"))),
         );
 
         let output = rawvars.evaluate(&no_vars())?;

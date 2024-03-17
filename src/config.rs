@@ -1,10 +1,12 @@
+use std::collections::BTreeMap;
+
 use anyhow::Result;
 use serde::Deserialize;
 use serde_yaml;
 
 use crate::{
     // task::{ForcingContext, Task, TaskEvaluation},
-    // task::TaskConfig,
+    task::TaskConfig,
     vars::RawVariableMap,
 };
 
@@ -17,7 +19,7 @@ pub struct RequeueConfig {
     #[serde(default = "default_version")]
     pub version: String,
     pub vars: Option<RawVariableMap>,
-    // pub tasks: BTreeMap<String, TaskConfig>,
+    pub tasks: BTreeMap<String, TaskConfig>,
 }
 
 impl RequeueConfig {
