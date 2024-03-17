@@ -1,4 +1,4 @@
-use crate::step::common::{CommandConfig, StepEvaluationResult};
+use crate::step::common::{CommandConfig, StepEvaluationResult, StepMethods};
 use crate::token::TokenedJsonValue;
 use anyhow::{anyhow, bail, Error, Result};
 use indexmap::IndexMap;
@@ -42,7 +42,7 @@ impl RawVariable {
     pub fn evaluate(&self, var_stack: &VariableMapStack) -> Result<JsonValue> {
         let output = match &self {
             RawVariable::Json(json_value) => json_value.evaluate_tokens(var_stack)?,
-            RawVariable::Executable(command) => match command.evaluate(var_stack)? {
+            RawVariable::Executable(command) => match command.evaluate(0, var_stack)? {
                 StepEvaluationResult::CompletedWithOutput(val) => val,
                 _ => bail!("Command did not result in an output"),
             },

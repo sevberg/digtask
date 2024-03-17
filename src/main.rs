@@ -25,12 +25,19 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     let config = RequeueConfig::load_yaml(&args.source)?;
-    let global_vars = match config.vars {
+    let global_vars = match &config.vars {
         None => VariableMap::new(),
         Some(rawvars) => rawvars.evaluate(&no_vars())?,
     };
 
     println!("{:?}", global_vars);
+
+    let main_task = config.get_task("prepare_country")?;
+
+    let var_stack = vec![&global_vars];
+    main_task
+        .prepare("main", &var_stack)?
+        .evaluate(&var_stack)?;
 
     Ok(())
 }

@@ -10,7 +10,7 @@ use std::{
     process::{Command, ExitStatus},
 };
 
-use super::common::StepEvaluationResult;
+use super::common::{StepEvaluationResult, StepMethods};
 
 fn default_command_entry() -> String {
     "bash -c".into()
@@ -59,6 +59,7 @@ pub struct BasicStep {
     pub env: Option<HashMap<String, String>>,
     pub dir: Option<String>,
     pub r#if: Option<Vec<String>>,
+    pub store: Option<String>,
 }
 
 impl BasicStep {
@@ -156,32 +157,53 @@ impl BasicStep {
         let output = command.output()?;
         Ok(output.status)
     }
+}
 
-    pub fn evaluate(&self, var_stack: &VariableMapStack) -> Result<StepEvaluationResult> {
+impl StepMethods for BasicStep {
+    fn get_store(&self) -> Option<&String> {
+        self.store.as_ref()
+    }
+
+    fn evaluate(
+        &self,
+        step_i: usize,
+        var_stack: &VariableMapStack,
+    ) -> Result<StepEvaluationResult> {
         let env = self.build_envs(var_stack)?;
         let dir = self.build_dir(var_stack)?;
 
         // Test If statements
-        match &self.r#if {
-            None => (),
+        let exit_on_if = match &self.r#if {
+            None => None,
             Some(statements) => {
+                let mut output = None;
                 for (i, statement) in statements.iter().enumerate() {
                     let statement = statement.evaluate_tokens_to_string("if-test", var_stack)?;
                     let result = self.test_if_statement(&statement, env.as_ref(), dir.as_ref())?;
                     if !result.success() {
-                        return Ok(StepEvaluationResult::SkippedDueToIfStatement((
-                            i + 1,
-                            statement,
-                        )));
+                        output = Some((i + 1, statement));
+                        break;
                     }
                 }
+                output
             }
+        };
+        if exit_on_if.is_some() {
+            let (if_stmt_id, if_stmt_str) = exit_on_if.unwrap();
+            println!(
+                "STEP:{} -- Skipped due to if statement #{}, '{}'",
+                step_i, if_stmt_id, if_stmt_str
+            );
+            return Ok(StepEvaluationResult::SkippedDueToIfStatement((
+                if_stmt_id,
+                if_stmt_str,
+            )));
         }
 
         // Execute Command
         let (mut command, string_rep) = self.build_command(var_stack)?;
         contextualize_command(command.borrow_mut(), env.as_ref(), dir.as_ref());
-        println!("{}", string_rep);
+        println!("STEP:{} -- {}", step_i, string_rep);
 
         let output = command.output()?;
 
@@ -209,7 +231,7 @@ impl BasicStep {
         let output = match serde_json::from_str::<JsonValue>(trimmed_data) {
             Ok(val) => val,
             Err(_) => trimmed_data.into(),
-            // Err(err)=>panic!("{}", err.to_string())
+            // Err(err)=>panic!("STEP:{} -- {}", step_i, err.to_string())
         };
 
         Ok(StepEvaluationResult::CompletedWithOutput(output))
@@ -235,9 +257,10 @@ mod test {
             env: None,
             dir: None,
             r#if: None,
+            store: None,
         };
 
-        let output = cmdconfig.evaluate(&no_vars())?;
+        let output = cmdconfig.evaluate(0, &no_vars())?;
         match output {
             StepEvaluationResult::CompletedWithOutput(output) => match output {
                 JsonValue::String(_) => (), // All good!
@@ -257,9 +280,10 @@ mod test {
             dir: Some("/".into()),
             env: None,
             r#if: None,
+            store: None,
         };
 
-        let output_dir = cmdconfig.evaluate(&no_vars())?;
+        let output_dir = cmdconfig.evaluate(0, &no_vars())?;
         assert_eq!(
             output_dir,
             StepEvaluationResult::CompletedWithOutput(json!["/"])
@@ -284,9 +308,10 @@ mod test {
             dir: None,
             env: Some(envmap),
             r#if: None,
+            store: None,
         };
 
-        let message = cmdconfig.evaluate(&vec![&vars])?;
+        let message = cmdconfig.evaluate(0, &vec![&vars])?;
         assert_eq!(
             message,
             StepEvaluationResult::CompletedWithOutput("IM_A_VARIABLE, but IM_A_dogs".into())
@@ -311,9 +336,10 @@ mod test {
             dir: None,
             env: None,
             r#if: Some(if_statements),
+            store: None,
         };
 
-        let outcome = cmdconfig.evaluate(&vec![&vars])?;
+        let outcome = cmdconfig.evaluate(0, &vec![&vars])?;
         match outcome {
             StepEvaluationResult::SkippedDueToIfStatement((i, statement)) => {
                 assert_eq!(i, 2);
@@ -333,9 +359,10 @@ mod test {
             env: None,
             dir: None,
             r#if: None,
+            store: None,
         };
 
-        let output = cmdconfig.evaluate(&no_vars())?;
+        let output = cmdconfig.evaluate(0, &no_vars())?;
 
         match output {
             StepEvaluationResult::CompletedWithOutput(output) => match output {
@@ -360,9 +387,10 @@ mod test {
             env: None,
             dir: None,
             r#if: None,
+            store: None,
         };
 
-        let output = cmdconfig.evaluate(&vec![&varmap])?;
+        let output = cmdconfig.evaluate(0, &vec![&varmap])?;
 
         match output {
             StepEvaluationResult::CompletedWithOutput(output) => match output {

@@ -6,7 +6,7 @@ use crate::vars::VariableMapStack;
 
 use super::{
     basic_step::{BasicStep, RawCommandEntry},
-    common::StepEvaluationResult,
+    common::{StepEvaluationResult, StepMethods},
 };
 
 fn default_executable() -> String {
@@ -21,6 +21,7 @@ pub struct BashStep {
     pub env: Option<HashMap<String, String>>,
     pub dir: Option<String>,
     pub r#if: Option<Vec<String>>,
+    pub store: Option<String>,
 }
 
 impl BashStep {
@@ -31,9 +32,20 @@ impl BashStep {
             env: None,
             dir: None,
             r#if: None,
+            store: None,
         }
     }
-    pub fn evaluate(&self, var_stack: &VariableMapStack) -> Result<StepEvaluationResult> {
+}
+
+impl StepMethods for BashStep {
+    fn get_store(&self) -> Option<&String> {
+        self.store.as_ref()
+    }
+    fn evaluate(
+        &self,
+        step_i: usize,
+        var_stack: &VariableMapStack,
+    ) -> Result<StepEvaluationResult> {
         // let executable = self.executable.evaluate(vars)?;
         BasicStep {
             entry: format!("{} -c", self.executable).into(),
@@ -41,8 +53,9 @@ impl BashStep {
             env: self.env.clone(),
             dir: self.dir.clone(),
             r#if: self.r#if.clone(),
+            store: self.store.clone(),
         }
-        .evaluate(var_stack)
+        .evaluate(step_i, var_stack)
     }
 }
 
@@ -63,9 +76,10 @@ mod test {
             env: None,
             dir: None,
             r#if: None,
+            store: None,
         };
 
-        let output = bash_command_config.evaluate(&no_vars())?;
+        let output = bash_command_config.evaluate(0, &no_vars())?;
         match output {
             StepEvaluationResult::CompletedWithOutput(output) => match output {
                 JsonValue::String(_) => (), // All good!

@@ -6,7 +6,7 @@ use crate::vars::VariableMapStack;
 
 use super::{
     basic_step::{BasicStep, RawCommandEntry},
-    common::StepEvaluationResult,
+    common::{StepEvaluationResult, StepMethods},
 };
 
 fn default_executable() -> String {
@@ -21,21 +21,10 @@ pub struct PythonStep {
     pub env: Option<HashMap<String, String>>,
     pub dir: Option<String>,
     pub r#if: Option<Vec<String>>,
+    pub store: Option<String>,
 }
 
 impl PythonStep {
-    pub fn evaluate(&self, var_stack: &VariableMapStack) -> Result<StepEvaluationResult> {
-        // let executable = self.executable.evaluate(vars)?;
-        BasicStep {
-            entry: format!("{} -c", self.executable).into(),
-            cmd: RawCommandEntry::Single(self.py.clone()),
-            env: self.env.clone(),
-            dir: self.dir.clone(),
-            r#if: self.r#if.clone(),
-        }
-        .evaluate(var_stack)
-    }
-
     pub fn new(command: &str) -> Self {
         PythonStep {
             executable: default_executable(),
@@ -43,7 +32,30 @@ impl PythonStep {
             env: None,
             dir: None,
             r#if: None,
+            store: None,
         }
+    }
+}
+
+impl StepMethods for PythonStep {
+    fn get_store(&self) -> Option<&String> {
+        self.store.as_ref()
+    }
+    fn evaluate(
+        &self,
+        step_i: usize,
+        var_stack: &VariableMapStack,
+    ) -> Result<StepEvaluationResult> {
+        // let executable = self.executable.evaluate(vars)?;
+        BasicStep {
+            entry: format!("{} -c", self.executable).into(),
+            cmd: RawCommandEntry::Single(self.py.clone()),
+            env: self.env.clone(),
+            dir: self.dir.clone(),
+            r#if: self.r#if.clone(),
+            store: self.store.clone(),
+        }
+        .evaluate(step_i, var_stack)
     }
 }
 
@@ -67,9 +79,10 @@ mod test {
             env: None,
             dir: None,
             r#if: None,
+            store: None,
         };
 
-        let output = command_config.evaluate(&vec![&vars])?;
+        let output = command_config.evaluate(0, &vec![&vars])?;
         match output {
             StepEvaluationResult::CompletedWithOutput(output) => match output {
                 JsonValue::Number(val) => {

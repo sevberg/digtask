@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use serde::Deserialize;
 use serde_yaml;
 
@@ -29,12 +29,12 @@ impl RequeueConfig {
         Ok(config)
     }
 
-    // pub fn get_task(&self, key: &str) -> Result<&Task> {
-    //     match self.tasks.get(key) {
-    //         Some(val) => Ok(val),
-    //         None => Err(anyhow!("Unknown task '{}'", key)),
-    //     }
-    // }
+    pub fn get_task(&self, key: &str) -> Result<&TaskConfig> {
+        match self.tasks.get(key) {
+            Some(val) => Ok(val),
+            None => Err(anyhow!("Unknown task '{}'", key)),
+        }
+    }
 
     // pub fn build_task_evaluation<'a>(
     //     &'a self,

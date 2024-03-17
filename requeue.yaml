@@ -20,7 +20,9 @@ tasks:
     steps:
       - 'echo PREPARING: {{iso3}}'
       - "echo $(pwd)"
-      - 'touch data/prepared_{{iso3}}-{{NAME}}.output'
+      - bash: 'touch data/prepared_{{iso3}}-{{NAME}}.output'
+        if: 
+        - '"dogs" = "{{NOW}}"'
       # - command: touch data/prepared_{{iso3}}.csv
       #   store: newvar
     inputs:
