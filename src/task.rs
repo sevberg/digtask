@@ -2,7 +2,11 @@ use anyhow::Result;
 use serde::Deserialize;
 
 use crate::{
-    step::common::{StepConfig, StepEvaluationResult, StepMethods},
+    config::RequeueConfig,
+    step::{
+        common::{StepConfig, StepEvaluationResult, StepMethods},
+        task_step::PreparedTaskStep,
+    },
     token::TokenedJsonValue,
     vars::{RawVariableMap, RawVariableMapTrait, VariableMap, VariableMapStack}, // vars::{process_raw_vars, ProcessedVarValueMap, RawVarValueMap, VarPriority},
 };
@@ -51,7 +55,7 @@ impl TaskConfig {
     ) -> Result<VariableMap> {
         let task_vars = match &self.vars {
             None => VariableMap::new(),
-            Some(rawvars) => rawvars.evaluate(var_stack, var_overrides)?,
+            Some(rawvars) => rawvars.evaluate(var_stack, var_overrides, true)?,
         };
 
         Ok(task_vars)
@@ -103,7 +107,7 @@ impl TaskConfig {
 #[derive(Debug)]
 pub struct PreparedTask {
     pub label: String,
-    pub steps: Vec<StepConfig>, // Vec<TaskStep>,
+    pub steps: Vec<StepConfig>,
     pub inputs: Vec<String>,
     pub outputs: Vec<String>,
     pub silent: bool,
@@ -112,7 +116,18 @@ pub struct PreparedTask {
 }
 
 impl PreparedTask {
-    pub fn evaluate(&mut self, var_stack: &VariableMapStack) -> Result<()> {
+    fn spawn(
+        &self,
+        task_def: PreparedTaskStep,
+        var_stack: &VariableMapStack,
+        config: &RequeueConfig,
+    ) -> Result<PreparedTask> {
+        let task = config.get_task(&task_def.task)?;
+        let task = task.prepare(&task_def.task, var_stack, &task_def.vars)?;
+        Ok(task)
+    }
+
+    pub fn evaluate(&mut self, var_stack: &VariableMapStack, config: &RequeueConfig) -> Result<()> {
         // TODO: Evaluate Inputs
         // TODO: Evaluate Outputs
         // TODO: Evaluate forcing
@@ -127,22 +142,30 @@ impl PreparedTask {
                 step.evaluate(step_i, &temp_var_stack)
             }?;
 
-            match step_output {
-                StepEvaluationResult::CompletedWithNoOutput => todo!(),
-                StepEvaluationResult::QueuedOneLocalTask(_) => todo!(),
-                StepEvaluationResult::QueuedManyLocalTasks(_) => todo!(),
-                StepEvaluationResult::SkippedDueToIfStatement(_) => (),
+            let mut sub_tasks = match step_output {
+                StepEvaluationResult::CompletedWithNoOutput => None,
+                StepEvaluationResult::Requeue(task_def) => {
+                    Some(self.spawn(task_def, var_stack, config)?)
+                }
+                StepEvaluationResult::SkippedDueToIfStatement(_) => None,
                 StepEvaluationResult::CompletedWithOutput(step_output) => {
                     // Check for storage
                     match step.get_store() {
                         Some(key) => {
                             self.task_vars.insert(key.clone(), step_output);
+                            None
                         }
-                        None => (),
+                        None => None,
                     }
                 }
+            };
+
+            match &mut sub_tasks {
+                Some(sub_task) => sub_task.evaluate(var_stack, config)?,
+                None => (),
             }
         }
+
         self.log("Finished");
 
         Ok(())

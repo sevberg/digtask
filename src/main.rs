@@ -17,6 +17,9 @@ struct Args {
     /// The config file to load
     #[arg(short, long, default_value = "requeue.yaml")]
     source: String,
+    /// The task to run
+    #[arg(short, long)]
+    task: String,
     /// Variables to override in the executed task
     #[arg(short, long)]
     var: Vec<String>,
@@ -45,16 +48,16 @@ fn main() -> Result<()> {
     // handle global variables
     let global_vars = match &config.vars {
         None => VariableMap::new(),
-        Some(rawvars) => rawvars.evaluate(&no_vars(), &var_overrides)?,
+        Some(rawvars) => rawvars.evaluate(&no_vars(), &var_overrides, true)?,
     };
     println!("{:?}", global_vars);
 
-    let main_task = config.get_task("prepare_country")?;
+    let main_task = config.get_task(&args.task)?;
 
     let var_stack = vec![&global_vars];
     main_task
         .prepare("main", &var_stack, &var_overrides)?
-        .evaluate(&var_stack)?;
+        .evaluate(&var_stack, &config)?;
 
     Ok(())
 }

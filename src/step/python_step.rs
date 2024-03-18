@@ -13,7 +13,7 @@ fn default_executable() -> String {
     "python3".into()
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct PythonStep {
     #[serde(default = "default_executable")]
     pub executable: String,

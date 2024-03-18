@@ -34,7 +34,7 @@ impl<'s> VariableMapStackTrait for VariableMapStack<'s> {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum RawVariable {
     Executable(CommandConfig),
@@ -62,6 +62,7 @@ pub trait RawVariableMapTrait {
         &self,
         var_stack: &VariableMapStack,
         var_overrides: &VariableMap,
+        copy_all_overrides: bool, // existing_vars: Option<VariableMap>,
     ) -> Result<VariableMap>;
     fn as_option(&self) -> Option<&RawVariableMap>;
 }
@@ -70,13 +71,20 @@ impl RawVariableMapTrait for RawVariableMap {
         &self,
         var_stack: &VariableMapStack,
         var_overrides: &VariableMap,
+        copy_all_overrides: bool, // existing_vars: Option<VariableMap>,
     ) -> Result<VariableMap> {
-        let mut output = VariableMap::new();
+        let mut output = match copy_all_overrides {
+            false => VariableMap::new(),
+            true => var_overrides.clone(),
+        };
 
         for (keytoken, rawvalue) in self.iter() {
-            let (key, value) = {
+            let keyvalue = {
                 match var_overrides.get(keytoken) {
-                    Some(val) => Ok::<(String, JsonValue), Error>((keytoken.clone(), val.clone())),
+                    Some(val) => match copy_all_overrides {
+                        true => Ok::<Option<(String, JsonValue)>, Error>(None),
+                        false => Ok(Some((keytoken.clone(), val.clone()))),
+                    },
                     None => {
                         let mut _var_stack = var_stack.clone(); // TODO: Does this clone the underlying data, or just the pointers?
                         _var_stack.push(&output);
@@ -85,12 +93,17 @@ impl RawVariableMapTrait for RawVariableMap {
                             other => bail!("We expected a string, not '{}'", other),
                         };
                         let value = rawvalue.evaluate(&_var_stack)?;
-                        Ok((key, value))
+                        Ok(Some((key, value)))
                     }
                 }
             }?;
 
-            output.insert(key.clone(), value);
+            match keyvalue {
+                None => (),
+                Some((key, value)) => {
+                    output.insert(key.clone(), value);
+                }
+            }
         }
 
         Ok(output)
@@ -143,7 +156,7 @@ mod test {
         );
 
         // Evaluate
-        let evaluated = raw_var_map.evaluate(&no_vars(), &no_overrides())?;
+        let evaluated = raw_var_map.evaluate(&no_vars(), &no_overrides(), false)?;
 
         let result = evaluated
             .get("fixed_int")
@@ -188,7 +201,7 @@ mod test {
             RawVariable::Executable(CommandConfig::Python(PythonStep::new("print(\"19\")"))),
         );
 
-        let output = rawvars.evaluate(&no_vars(), &no_overrides())?;
+        let output = rawvars.evaluate(&no_vars(), &no_overrides(), false)?;
 
         let value = output
             .get("dyn_key")

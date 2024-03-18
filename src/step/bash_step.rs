@@ -13,7 +13,7 @@ fn default_executable() -> String {
     "/bin/bash".into()
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct BashStep {
     #[serde(default = "default_executable")]
     pub executable: String,

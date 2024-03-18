@@ -16,7 +16,7 @@ fn default_command_entry() -> String {
     "bash -c".into()
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum RawCommandEntry {
     None,
@@ -51,7 +51,7 @@ fn contextualize_command(
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct BasicStep {
     pub cmd: RawCommandEntry,
     #[serde(default = "default_command_entry")]

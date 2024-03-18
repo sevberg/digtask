@@ -5,13 +5,14 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
+use super::task_step::{PreparedTaskStep, TaskStepConfig};
+
 #[derive(PartialEq, Debug)]
 pub enum StepEvaluationResult {
     SkippedDueToIfStatement((usize, String)),
     CompletedWithNoOutput,
     CompletedWithOutput(JsonValue),
-    QueuedOneLocalTask(String),
-    QueuedManyLocalTasks(Vec<String>),
+    Requeue(PreparedTaskStep),
 }
 
 pub trait StepMethods {
@@ -25,13 +26,15 @@ pub trait StepMethods {
 pub enum StepConfig {
     Simple(String),
     Config(CommandConfig),
+    Task(TaskStepConfig),
 }
 
 impl StepMethods for StepConfig {
     fn get_store(&self) -> Option<&String> {
         match &self {
-            StepConfig::Simple(x) => None,
+            StepConfig::Simple(_) => None,
             StepConfig::Config(x) => x.get_store(),
+            StepConfig::Task(x) => x.get_store(),
         }
     }
     fn evaluate(
@@ -42,11 +45,12 @@ impl StepMethods for StepConfig {
         match &self {
             StepConfig::Simple(x) => BashStep::new(x).evaluate(step_i, var_stack),
             StepConfig::Config(x) => x.evaluate(step_i, var_stack),
+            StepConfig::Task(x) => x.evaluate(step_i, var_stack),
         }
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum CommandConfig {
     Basic(BasicStep),
