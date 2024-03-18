@@ -15,6 +15,9 @@ pub trait VariableMapStackTrait {
 pub fn no_vars<'a>() -> VariableMapStack<'a> {
     Vec::new()
 }
+pub fn no_overrides() -> VariableMap {
+    VariableMap::new()
+}
 
 impl<'s> VariableMapStackTrait for VariableMapStack<'s> {
     // blloooo
@@ -55,23 +58,36 @@ impl RawVariable {
 pub type RawVariableMap = IndexMap<String, RawVariable>;
 
 pub trait RawVariableMapTrait {
-    fn evaluate(&self, var_stack: &VariableMapStack) -> Result<VariableMap>;
+    fn evaluate(
+        &self,
+        var_stack: &VariableMapStack,
+        var_overrides: &VariableMap,
+    ) -> Result<VariableMap>;
     fn as_option(&self) -> Option<&RawVariableMap>;
 }
 impl RawVariableMapTrait for RawVariableMap {
-    fn evaluate(&self, var_stack: &VariableMapStack) -> Result<VariableMap> {
+    fn evaluate(
+        &self,
+        var_stack: &VariableMapStack,
+        var_overrides: &VariableMap,
+    ) -> Result<VariableMap> {
         let mut output = VariableMap::new();
 
         for (keytoken, rawvalue) in self.iter() {
             let (key, value) = {
-                let mut _var_stack = var_stack.clone(); // TODO: Does this clone the underlying data, or just the pointers?
-                _var_stack.push(&output);
-                let key = match keytoken.evaluate_tokens(&_var_stack)? {
-                    JsonValue::String(val) => val,
-                    other => bail!("We expected a string, not '{}'", other),
-                };
-                let value = rawvalue.evaluate(&_var_stack)?;
-                Ok::<(String, JsonValue), Error>((key, value))
+                match var_overrides.get(keytoken) {
+                    Some(val) => Ok::<(String, JsonValue), Error>((keytoken.clone(), val.clone())),
+                    None => {
+                        let mut _var_stack = var_stack.clone(); // TODO: Does this clone the underlying data, or just the pointers?
+                        _var_stack.push(&output);
+                        let key = match keytoken.evaluate_tokens(&_var_stack)? {
+                            JsonValue::String(val) => val,
+                            other => bail!("We expected a string, not '{}'", other),
+                        };
+                        let value = rawvalue.evaluate(&_var_stack)?;
+                        Ok((key, value))
+                    }
+                }
             }?;
 
             output.insert(key.clone(), value);
@@ -127,7 +143,7 @@ mod test {
         );
 
         // Evaluate
-        let evaluated = raw_var_map.evaluate(&no_vars())?;
+        let evaluated = raw_var_map.evaluate(&no_vars(), &no_overrides())?;
 
         let result = evaluated
             .get("fixed_int")
@@ -172,7 +188,7 @@ mod test {
             RawVariable::Executable(CommandConfig::Python(PythonStep::new("print(\"19\")"))),
         );
 
-        let output = rawvars.evaluate(&no_vars())?;
+        let output = rawvars.evaluate(&no_vars(), &no_overrides())?;
 
         let value = output
             .get("dyn_key")

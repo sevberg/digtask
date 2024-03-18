@@ -44,10 +44,14 @@ pub struct TaskConfig {
 }
 
 impl TaskConfig {
-    pub fn build_vars(&self, var_stack: &VariableMapStack) -> Result<VariableMap> {
+    pub fn build_vars(
+        &self,
+        var_stack: &VariableMapStack,
+        var_overrides: &VariableMap,
+    ) -> Result<VariableMap> {
         let task_vars = match &self.vars {
             None => VariableMap::new(),
-            Some(rawvars) => rawvars.evaluate(var_stack)?,
+            Some(rawvars) => rawvars.evaluate(var_stack, var_overrides)?,
         };
 
         Ok(task_vars)
@@ -57,8 +61,9 @@ impl TaskConfig {
         &'a self,
         default_label: &str,
         var_stack: &'a VariableMapStack,
+        var_overrides: &VariableMap,
     ) -> Result<PreparedTask> {
-        let task_vars = self.build_vars(var_stack)?;
+        let task_vars = self.build_vars(var_stack, var_overrides)?;
         let mut task_var_stack = var_stack.clone();
         task_var_stack.push(&task_vars);
 
