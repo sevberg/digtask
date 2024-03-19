@@ -143,7 +143,6 @@ impl PreparedTask {
             }?;
 
             let mut sub_tasks = match step_output {
-                StepEvaluationResult::CompletedWithNoOutput => None,
                 StepEvaluationResult::Requeue(task_def) => {
                     Some(self.spawn(task_def, var_stack, config)?)
                 }

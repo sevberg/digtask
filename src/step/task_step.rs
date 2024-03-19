@@ -1,25 +1,16 @@
 use crate::{
-    task::PreparedTask,
     token::TokenedJsonValue,
     vars::{no_overrides, RawVariableMap, RawVariableMapTrait, VariableMap, VariableMapStack},
 };
 use anyhow::{anyhow, Result};
-use colored::Colorize;
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
 use std::{
-    borrow::BorrowMut,
     collections::HashMap,
-    ops::Deref,
     path::Path,
     process::{Command, ExitStatus},
 };
 
 use super::common::{StepEvaluationResult, StepMethods};
-
-fn default_inherit_parent_vars() -> bool {
-    true
-}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct TaskStepConfig {

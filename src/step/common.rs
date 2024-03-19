@@ -10,7 +10,6 @@ use super::task_step::{PreparedTaskStep, TaskStepConfig};
 #[derive(PartialEq, Debug)]
 pub enum StepEvaluationResult {
     SkippedDueToIfStatement((usize, String)),
-    CompletedWithNoOutput,
     CompletedWithOutput(JsonValue),
     Requeue(PreparedTaskStep),
 }

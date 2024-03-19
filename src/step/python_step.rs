@@ -25,6 +25,7 @@ pub struct PythonStep {
 }
 
 impl PythonStep {
+    #[allow(dead_code)]
     pub fn new(command: &str) -> Self {
         PythonStep {
             executable: default_executable(),
