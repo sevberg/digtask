@@ -1,4 +1,4 @@
-version: '3'
+version: "3"
 
 vars:
   NAME: sevberg
@@ -7,7 +7,7 @@ vars:
   NOW:
     bash: date
   SOME_NUM:
-    py: | 
+    py: |
       import math
       import json
       print(json.dumps({ "{{NAME}}": math.sqrt( {{NUM}} )}))
@@ -16,13 +16,13 @@ tasks:
   prepare_country:
     vars:
       iso3: DEU
-    label: 'prepare_country[{{iso3}},{{NAME}}]'
+    label: "prepare_country[{{iso3}},{{NAME}}]"
     steps:
-      - 'echo PREPARING: {{iso3}}'
+      - "echo PREPARING: {{iso3}}"
       - "echo $(pwd)"
-      - bash: 'touch data/prepared_{{iso3}}-{{NAME}}.output'
-        if: 
-        - '"dogs" = "{{NOW}}"'
+      - bash: "touch data/prepared_{{iso3}}-{{NAME}}.output"
+        if:
+          - '"dogs" = "{{NOW}}"'
       # - command: touch data/prepared_{{iso3}}.csv
       #   store: newvar
     inputs:
@@ -34,14 +34,11 @@ tasks:
   analyze_country:
     vars:
       iso3: USA
-    label: 'analyze_country={{iso3}}'
+    label: "analyze_country={{iso3}}"
     steps:
       - task: prepare_country
-        vars: {}
-          # NAME: jane
-          # iso3: '{{iso3}}'
-      - 'echo ANALYZING: {{iso3}}'
-    #     map_over: 
+      - "echo ANALYZING: {{iso3}}"
+    #     map_over:
     #       iso3: iso3
     #       NAME: COUNTRIES
     #   - 'echo "ANALYZING: {{iso3}}"'
@@ -49,10 +46,8 @@ tasks:
     #   - data/prepared_{{iso3}}.csv
     # outputs:
     #   - data/analyzed_{{iso3}}.csv
-  
-#   analyze_all:
-#     cmds:
-#       - for: { var: COUNTRIES }
-#         task: analyze_country
-#         vars:
-#           iso3: '{{.ITEM}}'
+  analyze_all:
+    steps:
+      - task: analyze_country
+        over:
+          iso3: "{{COUNTRIES}}"

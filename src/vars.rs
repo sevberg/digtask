@@ -20,7 +20,6 @@ pub fn no_overrides() -> VariableMap {
 }
 
 impl<'s> VariableMapStackTrait for VariableMapStack<'s> {
-    // blloooo
     fn get_key(&self, key: &str) -> Result<&'s JsonValue> {
         for vars in self.iter().rev() {
             match vars.get(key) {

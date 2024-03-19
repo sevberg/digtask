@@ -1,14 +1,14 @@
 use crate::{
     token::TokenedJsonValue,
-    vars::{no_overrides, RawVariableMap, RawVariableMapTrait, VariableMap, VariableMapStack},
+    vars::{
+        no_overrides, RawVariableMap, RawVariableMapTrait, VariableMap, VariableMapStack,
+        VariableMapStackTrait,
+    },
 };
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    path::Path,
-    process::{Command, ExitStatus},
-};
+use serde_json::json;
+use std::{collections::HashMap, path::Path, process::Command};
 
 use super::common::{StepEvaluationResult, StepMethods};
 
@@ -85,32 +85,142 @@ impl TaskStepConfig {
         Ok(output)
     }
 
-    // pub fn build_vars(
-    //     &self,
-    //     var_stack: &VariableMapStack,
-    //     var_overrides: &VariableMap,
-    // ) -> Result<VariableMap> {
-    //     let task_vars = match &self.vars {
-    //         None => VariableMap::new(),
-    //         Some(rawvars) => rawvars.evaluate(var_stack, var_overrides)?,
-    //     };
+    fn process_variables(&self, var_stack: &VariableMapStack) -> Result<VariableMap> {
+        let step_vars = match &self.vars {
+            None => (*var_stack.last().expect(
+                "A TaskStep should always have it's parent's vars as the last item in the var stack",
+            )).clone(),
+            Some(rawvars) => rawvars.evaluate(&var_stack, &no_overrides(), false)?,
+        };
 
-    //     Ok(task_vars)
-    // }
+        Ok(step_vars)
+    }
 
     fn test_if_statement(
         &self,
-        statement: &String,
+        var_stack: &VariableMapStack,
         env: Option<&HashMap<String, String>>,
         dir: Option<&String>,
-    ) -> Result<ExitStatus> {
-        let mut command = Command::new("bash");
-        command.arg("-c");
-        let _command = command.arg(format!("test {}", statement));
-        contextualize_command(_command, env, dir);
+    ) -> Result<Option<(usize, String)>> {
+        // Test If statements
+        match &self.r#if {
+            None => Ok(None),
+            Some(statements) => {
+                let mut output = None;
+                for (i, statement) in statements.iter().enumerate() {
+                    let statement = statement.evaluate_tokens_to_string("if-test", var_stack)?;
 
-        let output = command.output()?;
-        Ok(output.status)
+                    let mut command = Command::new("bash");
+                    command.arg("-c");
+                    let _command = command.arg(format!("test {}", statement));
+
+                    contextualize_command(_command, env, dir);
+
+                    let command_output = command.output()?;
+                    let result = command_output.status;
+                    if !result.success() {
+                        output = Some((i + 1, statement));
+                        break;
+                    }
+                }
+                Ok(output)
+            }
+        }
+    }
+
+    fn log(&self, step_i: usize, message: String) {
+        println!("STEP:{} -- {}", step_i, message)
+    }
+
+    fn _prepare_subtask(
+        &self,
+        step_i: usize,
+        step_vars: &VariableMap,
+        var_stack: &VariableMapStack,
+        env: Option<&HashMap<String, String>>,
+        dir: Option<&String>,
+        map_vars: Option<&Vec<(String, String)>>,
+    ) -> Result<Vec<PreparedTaskStep>> {
+        let output = match map_vars {
+            None => {
+                let task = PreparedTaskStep {
+                    // Note we clone everything so that each task manages it's own data
+                    task: self.task.clone(),
+                    vars: step_vars.clone(),
+                    env: env.cloned(),
+                    dir: dir.cloned(),
+                    over: self.over.clone(),
+                };
+                self.log(
+                    step_i,
+                    format!(
+                        "Queueing Task {} - '{}'",
+                        &task.task,
+                        serde_json::to_string(&task.vars)?,
+                    ),
+                );
+                vec![task]
+            }
+
+            Some(map_vars) => {
+                let mut map_vars = map_vars.clone();
+                match map_vars.pop() {
+                    None => self._prepare_subtask(step_i, step_vars, var_stack, env, dir, None)?,
+                    Some((target_key, source_key)) => {
+                        let source_value_vec = match source_key.evaluate_tokens(var_stack)? {
+                            serde_json::Value::Array(x) => x.clone(),
+                            serde_json::Value::Object(_) => {
+                                bail!("Unable to map over object variable '{}'", source_key)
+                            }
+                            other => vec![other.clone()],
+                        };
+
+                        let mut output = Vec::new();
+                        for source_value in source_value_vec.into_iter() {
+                            let mut new_step_vars = step_vars.clone();
+                            new_step_vars.insert(target_key.clone(), source_value);
+
+                            let new_tasks = self._prepare_subtask(
+                                step_i,
+                                &new_step_vars,
+                                var_stack,
+                                env,
+                                dir,
+                                Some(&map_vars),
+                            )?;
+                            output.extend(new_tasks);
+                        }
+
+                        output
+                    }
+                }
+            }
+        };
+        Ok(output)
+    }
+
+    fn prepare_subtasks(
+        &self,
+        step_i: usize,
+        step_vars: &VariableMap,
+        var_stack: &VariableMapStack,
+        env: Option<&HashMap<String, String>>,
+        dir: Option<&String>,
+    ) -> Result<StepEvaluationResult> {
+        let output = match &self.over {
+            None => {
+                let tasks = self._prepare_subtask(step_i, step_vars, var_stack, env, dir, None)?;
+                StepEvaluationResult::SubmitTasks(tasks)
+            }
+            Some(map_over) => {
+                let map_vars = Vec::from_iter(map_over.clone().into_iter());
+                let tasks =
+                    self._prepare_subtask(step_i, step_vars, var_stack, env, dir, Some(&map_vars))?;
+                StepEvaluationResult::SubmitTasks(tasks)
+            }
+        };
+
+        Ok(output)
     }
 }
 
@@ -126,57 +236,24 @@ impl StepMethods for TaskStepConfig {
         let env = self.build_envs(var_stack)?;
         let dir = self.build_dir(var_stack)?;
 
-        // Process the var stack
         let mut var_stack = var_stack.clone();
-
-        let step_vars = match &self.vars {
-            None => (*var_stack.last().expect(
-                "A TaskStep should always have it's parent's vars as the last item in the var stack",
-            )).clone(),
-            Some(rawvars) => rawvars.evaluate(&var_stack, &no_overrides(), false)?,
-        };
+        let step_vars = self.process_variables(&var_stack)?;
         var_stack.push(&step_vars);
 
-        // Test If statements
-        let exit_on_if = match &self.r#if {
-            None => None,
-            Some(statements) => {
-                let mut output = None;
-                for (i, statement) in statements.iter().enumerate() {
-                    let statement = statement.evaluate_tokens_to_string("if-test", &var_stack)?;
-                    let result = self.test_if_statement(&statement, env.as_ref(), dir.as_ref())?;
-                    if !result.success() {
-                        output = Some((i + 1, statement));
-                        break;
-                    }
-                }
-                output
-            }
-        };
-
+        let exit_on_if = self.test_if_statement(&var_stack, env.as_ref(), dir.as_ref())?;
         let output = match exit_on_if {
             Some((if_stmt_id, if_stmt_str)) => {
-                println!(
-                    "STEP:{} -- Skipped due to if statement #{}, '{}'",
-                    step_i, if_stmt_id, if_stmt_str
+                self.log(
+                    step_i,
+                    format!(
+                        "Skipped due to if statement #{}, '{}'",
+                        if_stmt_id, if_stmt_str
+                    ),
                 );
                 StepEvaluationResult::SkippedDueToIfStatement((if_stmt_id, if_stmt_str))
             }
             None => {
-                let task = PreparedTaskStep {
-                    task: self.task.clone(),
-                    vars: step_vars,
-                    env: env,
-                    dir: dir,
-                    over: self.over.clone(),
-                };
-                println!(
-                    "STEP:{} -- Queueing Task {} - '{}'",
-                    step_i,
-                    &task.task,
-                    serde_json::to_string(&task.vars)?
-                );
-                StepEvaluationResult::Requeue(task)
+                self.prepare_subtasks(step_i, &step_vars, &var_stack, env.as_ref(), dir.as_ref())?
             }
         };
 

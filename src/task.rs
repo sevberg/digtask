@@ -142,27 +142,29 @@ impl PreparedTask {
                 step.evaluate(step_i, &temp_var_stack)
             }?;
 
-            let mut sub_tasks = match step_output {
-                StepEvaluationResult::Requeue(task_def) => {
-                    Some(self.spawn(task_def, var_stack, config)?)
+            match step_output {
+                StepEvaluationResult::SubmitTasks(submittable_tasks) => {
+                    for submittable_task in submittable_tasks.iter() {
+                        let subtask_config = config.get_task(&submittable_task.task)?;
+                        let mut subtask = subtask_config.prepare(
+                            &submittable_task.task,
+                            var_stack,
+                            &submittable_task.vars,
+                        )?;
+                        subtask.evaluate(var_stack, config)?;
+                    }
                 }
-                StepEvaluationResult::SkippedDueToIfStatement(_) => None,
+                StepEvaluationResult::SkippedDueToIfStatement(_) => (),
                 StepEvaluationResult::CompletedWithOutput(step_output) => {
                     // Check for storage
                     match step.get_store() {
                         Some(key) => {
                             self.task_vars.insert(key.clone(), step_output);
-                            None
                         }
-                        None => None,
+                        None => (),
                     }
                 }
             };
-
-            match &mut sub_tasks {
-                Some(sub_task) => sub_task.evaluate(var_stack, config)?,
-                None => (),
-            }
         }
 
         self.log("Finished");

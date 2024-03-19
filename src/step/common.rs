@@ -11,7 +11,7 @@ use super::task_step::{PreparedTaskStep, TaskStepConfig};
 pub enum StepEvaluationResult {
     SkippedDueToIfStatement((usize, String)),
     CompletedWithOutput(JsonValue),
-    Requeue(PreparedTaskStep),
+    SubmitTasks(Vec<PreparedTaskStep>),
 }
 
 pub trait StepMethods {
