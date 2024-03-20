@@ -226,15 +226,20 @@ impl StepMethods for BasicStep {
         }
 
         // Parse output and return
-        let trimmed_data = stdout.trim();
+        match output.status.success() {
+            true => {
+                let trimmed_data = stdout.trim();
 
-        let output = match serde_json::from_str::<JsonValue>(trimmed_data) {
-            Ok(val) => val,
-            Err(_) => trimmed_data.into(),
-            // Err(err)=>panic!("STEP:{} -- {}", step_i, err.to_string())
-        };
+                let output = match serde_json::from_str::<JsonValue>(trimmed_data) {
+                    Ok(val) => val,
+                    Err(_) => trimmed_data.into(),
+                    // Err(err)=>panic!("STEP:{} -- {}", step_i, err.to_string())
+                };
 
-        Ok(StepEvaluationResult::CompletedWithOutput(output))
+                Ok(StepEvaluationResult::CompletedWithOutput(output))
+            }
+            false => Err(anyhow!("{}", stderr)),
+        }
     }
 }
 
@@ -267,6 +272,26 @@ mod test {
                 other => bail!("We expected a string, not '{}'", other),
             },
             _ => bail!("The step did not complete"),
+        };
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sadpath() -> Result<()> {
+        let cmdconfig = BasicStep {
+            cmd: RawCommandEntry::None,
+            entry: "whoamiwhoamiwhoami".into(),
+            env: None,
+            dir: None,
+            r#if: None,
+            store: None,
+        };
+
+        let output = cmdconfig.evaluate(0, &no_vars());
+        match output {
+            Ok(val) => bail!("We expected a failure, but got '{:?}'", val),
+            Err(error) => assert_eq!(error.to_string(), "No such file or directory (os error 2)"),
         };
 
         Ok(())
