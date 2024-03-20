@@ -5,6 +5,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
+use super::parallel_step::ParallelStepConfig;
 use super::task_step::{PreparedTaskStep, TaskStepConfig};
 
 #[derive(PartialEq, Debug)]
@@ -17,15 +18,18 @@ pub enum StepEvaluationResult {
 pub trait StepMethods {
     fn evaluate(&self, step_i: usize, var_stack: &VariableMapStack)
         -> Result<StepEvaluationResult>;
-    fn get_store(&self) -> Option<&String>;
+    fn get_store(&self) -> Option<&String> {
+        None
+    }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum StepConfig {
     Simple(String),
     Config(CommandConfig),
     Task(TaskStepConfig),
+    Parallel(ParallelStepConfig),
 }
 
 impl StepMethods for StepConfig {
@@ -34,6 +38,7 @@ impl StepMethods for StepConfig {
             StepConfig::Simple(_) => None,
             StepConfig::Config(x) => x.get_store(),
             StepConfig::Task(x) => x.get_store(),
+            StepConfig::Parallel(x) => x.get_store(),
         }
     }
     fn evaluate(
@@ -45,6 +50,7 @@ impl StepMethods for StepConfig {
             StepConfig::Simple(x) => BashStep::new(x).evaluate(step_i, var_stack),
             StepConfig::Config(x) => x.evaluate(step_i, var_stack),
             StepConfig::Task(x) => x.evaluate(step_i, var_stack),
+            StepConfig::Parallel(x) => x.evaluate(step_i, var_stack),
         }
     }
 }

@@ -23,7 +23,6 @@ tasks:
       - bash: "touch data/prepared_{{iso3}}-{{NAME}}.output"
         if:
           - '"dogs" = "{{NOW}}"'
-      # - command: touch data/prepared_{{iso3}}.csv
       #   store: newvar
     inputs:
       - data/input_{{iso3}}.csv
@@ -36,16 +35,10 @@ tasks:
       iso3: USA
     label: "analyze_country={{iso3}}"
     steps:
-      - task: prepare_country
-      - "echo ANALYZING: {{iso3}}"
-    #     map_over:
-    #       iso3: iso3
-    #       NAME: COUNTRIES
-    #   - 'echo "ANALYZING: {{iso3}}"'
-    # inputs:
-    #   - data/prepared_{{iso3}}.csv
-    # outputs:
-    #   - data/analyzed_{{iso3}}.csv
+      - parallel:
+          - 'echo "something in parallel.."'
+          - task: prepare_country
+      - 'echo "ANALYZING: {{iso3}}"'
   analyze_all:
     steps:
       - task: analyze_country
