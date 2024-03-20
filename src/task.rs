@@ -116,17 +116,6 @@ pub struct PreparedTask {
 }
 
 impl PreparedTask {
-    fn spawn(
-        &self,
-        task_def: PreparedTaskStep,
-        var_stack: &VariableMapStack,
-        config: &RequeueConfig,
-    ) -> Result<PreparedTask> {
-        let task = config.get_task(&task_def.task)?;
-        let task = task.prepare(&task_def.task, var_stack, &task_def.vars)?;
-        Ok(task)
-    }
-
     pub fn evaluate(&mut self, var_stack: &VariableMapStack, config: &RequeueConfig) -> Result<()> {
         // TODO: Evaluate Inputs
         // TODO: Evaluate Outputs
@@ -179,5 +168,15 @@ impl PreparedTask {
     fn log_bad(&self, message: &str) {
         let message = format!("TASK:{} -- {}", self.label, message).red();
         println!("{}", message)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_task() -> Result<()> {
+        todo!()
     }
 }

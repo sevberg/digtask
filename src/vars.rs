@@ -54,6 +54,12 @@ impl RawVariable {
     }
 }
 
+impl From<JsonValue> for RawVariable {
+    fn from(value: JsonValue) -> Self {
+        RawVariable::Json(value)
+    }
+}
+
 pub type RawVariableMap = IndexMap<String, RawVariable>;
 
 pub trait RawVariableMapTrait {
