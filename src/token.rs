@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use anyhow::{anyhow, bail, Result};
 
 use serde_json::Value as JsonValue;
@@ -7,7 +5,7 @@ use winnow::combinator::{alt, delimited};
 use winnow::token::{any, take_till, take_until, take_while};
 use winnow::{PResult, Parser};
 
-use crate::vars::{VariableMapStack, VariableMapStackTrait};
+use crate::vars::VariableSet;
 
 #[derive(Debug)]
 enum ParsedElement<'s> {
@@ -58,7 +56,7 @@ fn parse_all_elements<'s>(input: &'s str) -> PResult<Vec<ParsedElement<'s>>> {
     Ok(output)
 }
 
-fn evaluate_tokens(input: &str, var_stack: &Vec<&HashMap<String, JsonValue>>) -> Result<JsonValue> {
+fn evaluate_tokens(input: &str, vars: &VariableSet) -> Result<JsonValue> {
     // Begin Parsing
     let mut elements = match parse_all_elements(input) {
         Ok(val) => val,
@@ -69,7 +67,7 @@ fn evaluate_tokens(input: &str, var_stack: &Vec<&HashMap<String, JsonValue>>) ->
     let output = match elements.len() {
         0 => JsonValue::Null,
         1 => match elements.pop().unwrap() {
-            ParsedElement::Token(key) => var_stack.get_key(key)?.clone(),
+            ParsedElement::Token(key) => vars.get(key)?.clone(),
             ParsedElement::Literal(value) => JsonValue::String(value.to_string()),
         },
         _ => {
@@ -79,7 +77,7 @@ fn evaluate_tokens(input: &str, var_stack: &Vec<&HashMap<String, JsonValue>>) ->
                 match element {
                     ParsedElement::Literal(val) => string_stack.push(val.to_string()),
                     ParsedElement::Token(key) => {
-                        let value = match var_stack.get_key(key)? {
+                        let value = match vars.get(key)? {
                             JsonValue::String(str_value) => str_value.clone(),
                             non_str_value => serde_json::to_string(non_str_value)?,
                         };
@@ -97,13 +95,9 @@ fn evaluate_tokens(input: &str, var_stack: &Vec<&HashMap<String, JsonValue>>) ->
 }
 
 pub trait TokenedJsonValue {
-    fn evaluate_tokens(&self, var_stack: &VariableMapStack) -> Result<JsonValue>;
-    fn evaluate_tokens_to_string(
-        &self,
-        token_type: &str,
-        var_stack: &VariableMapStack,
-    ) -> Result<String> {
-        let output = match self.evaluate_tokens(var_stack)? {
+    fn evaluate_tokens(&self, vars: &VariableSet) -> Result<JsonValue>;
+    fn evaluate_tokens_to_string(&self, token_type: &str, vars: &VariableSet) -> Result<String> {
+        let output = match self.evaluate_tokens(vars)? {
             JsonValue::String(val) => Ok(val),
             other => Err(anyhow!(
                 "A {} must evaluate to a String. Got '{}'",
@@ -116,17 +110,22 @@ pub trait TokenedJsonValue {
 }
 
 impl TokenedJsonValue for String {
-    fn evaluate_tokens(&self, var_stack: &VariableMapStack) -> Result<JsonValue> {
-        return evaluate_tokens(self, var_stack);
+    fn evaluate_tokens(&self, vars: &VariableSet) -> Result<JsonValue> {
+        return evaluate_tokens(self, vars);
+    }
+}
+impl TokenedJsonValue for &str {
+    fn evaluate_tokens(&self, vars: &VariableSet) -> Result<JsonValue> {
+        return evaluate_tokens(self, vars);
     }
 }
 impl TokenedJsonValue for JsonValue {
-    fn evaluate_tokens(&self, var_stack: &VariableMapStack) -> Result<JsonValue> {
+    fn evaluate_tokens(&self, vars: &VariableSet) -> Result<JsonValue> {
         let output = match self {
             JsonValue::Object(valmap) => {
                 let mut output = serde_json::Map::new();
                 for (key, val) in valmap.iter() {
-                    let detokened_key = match evaluate_tokens(key, var_stack)? {
+                    let detokened_key = match evaluate_tokens(key, vars)? {
                         JsonValue::String(val) => val,
                         other => bail!(
                             "Map keys should always map to strings: '{}' became '{}'",
@@ -134,7 +133,7 @@ impl TokenedJsonValue for JsonValue {
                             other
                         ),
                     };
-                    let detokened_value = val.evaluate_tokens(var_stack)?;
+                    let detokened_value = val.evaluate_tokens(vars)?;
                     output.insert(detokened_key, detokened_value);
                 }
                 JsonValue::Object(output)
@@ -142,12 +141,12 @@ impl TokenedJsonValue for JsonValue {
             JsonValue::Array(valarr) => {
                 let mut output = Vec::new();
                 for val in valarr.iter() {
-                    let detokened_value = val.evaluate_tokens(var_stack)?;
+                    let detokened_value = val.evaluate_tokens(vars)?;
                     output.push(detokened_value);
                 }
                 JsonValue::Array(output)
             }
-            JsonValue::String(valstr) => valstr.evaluate_tokens(var_stack)?,
+            JsonValue::String(valstr) => valstr.evaluate_tokens(vars)?,
             other => other.clone(),
         };
         Ok(output)
@@ -156,99 +155,70 @@ impl TokenedJsonValue for JsonValue {
 
 #[cfg(test)]
 mod test {
-    // use crate::vars::{ReferenceVariableMap, VariableMap, VariableMapLike, NO_VARS};
-
+    use super::*;
+    use rstest::*;
     use serde_json::json;
 
-    use crate::vars::{no_vars, VariableMap};
-
-    use super::*;
+    use crate::vars::test_utils::*;
 
     #[test]
     fn test_multiline() -> Result<()> {
-        let vars = HashMap::from([
-            ("NAME".to_string(), json!("bob")),
-            ("NUM".to_string(), json!(3.0)),
-        ]);
-        let var_stack = vec![&vars];
+        let vars = variable_set_bob();
 
         let raw = json!(
             "import math
 import json
-print(json.dumps({ \"{{NAME}}\": math.sqrt( {{NUM}} )}))"
+print(json.dumps({ \"{{NAME}}\": math.sqrt( {{AGE}} )}))"
         );
 
-        let output = raw.evaluate_tokens(&var_stack)?;
+        let output = raw.evaluate_tokens(&vars)?;
 
         let expected = json!(
             "import math
 import json
-print(json.dumps({ \"bob\": math.sqrt( 3.0 )}))"
+print(json.dumps({ \"bob\": math.sqrt( 43.0 )}))"
         );
         assert_eq!(output, expected);
 
         Ok(())
     }
 
-    #[test]
-    fn test_token_parsing() -> Result<()> {
-        // Build testing variable containers
-        let namespace_1_vars = HashMap::from([
-            ("key_1".to_string(), JsonValue::String("val_1".to_string())),
-            ("key_2".to_string(), JsonValue::String("val_2".to_string())),
-        ]);
-        let namespace_2_vars = HashMap::from([
-            (
-                "key_1".to_string(),
-                JsonValue::String("val_1_updated".to_string()),
-            ),
-            ("key_3".to_string(), JsonValue::String("val_3".to_string())),
-            ("key_4".to_string(), JsonValue::String("val_4".to_string())),
-        ]);
-        let task_vars = HashMap::from([
-            ("key_5".to_string(), JsonValue::String("val_5".to_string())),
-            (
-                "key_2".to_string(),
-                JsonValue::String("val_2_updated".to_string()),
-            ),
-        ]);
-        let var_stack = vec![&namespace_1_vars, &namespace_2_vars, &task_vars];
-
-        // Begin Parsing
-        let mut input =
-            "{{key_1}} meep \"{{key_2 }}\" or {{  key_3}} but/*{{key_4}}*/ {{key_5}} okay?";
-
-        let output = evaluate_tokens(&mut input, &var_stack)?;
-        assert_eq!(
-            output,
-            JsonValue::String(
-                "val_1_updated meep \"val_2_updated\" or val_3 but{{key_4}} val_5 okay?"
-                    .to_string()
-            )
-        );
-        println!("{}", output);
-
-        Ok(())
+    #[rstest]
+    // Happy path :)
+    #[case("just some regular string", "just some regular string")]
+    #[case("{NAME}", "{NAME}")]
+    #[case("{{NAME}}", "bob")]
+    #[case("{{NAME}}  ", "bob  ")]
+    #[case("  {{NAME}}  ", "  bob  ")]
+    #[case("  {{NAME}}", "  bob")]
+    #[case("{{  NAME}}", "bob")]
+    #[case("{{  NAME  }}", "bob")]
+    #[case("{{NAME  }}", "bob")]
+    #[case("{{{NAME}}}", "{bob}")]
+    #[case("{{{{NAME}}}}", "{{bob}}")]
+    #[case("/*{{NAME}}*/", "{{NAME}}")]
+    #[case(
+        "{{NAME}}'s number are {{FAVORITE_NUMBERS}}",
+        "bob's number are [7,13,99]"
+    )]
+    // Sad path :(
+    #[should_panic(expected = "A string must evaluate to a String. Got '[7,13,99]'")]
+    #[case("{{FAVORITE_NUMBERS}}", "")]
+    #[trace] //This attribute enable tracing
+    fn string_tokens(#[case] token: &str, #[case] expected: &str) {
+        let vars = variable_set_bob();
+        let parsed = token.evaluate_tokens_to_string("string", &vars).unwrap();
+        assert_eq!(parsed, expected);
     }
 
     #[test]
-    fn evaluate_without_vars() -> Result<()> {
-        let input = json!["just a string"];
-        let output = input.evaluate_tokens(&no_vars())?;
+    fn object_token() -> Result<()> {
+        let vars = variable_set_bob();
+        let output = "{{CHILDREN_AGES}}".evaluate_tokens(&vars)?;
 
-        assert_eq!(output, input);
-        Ok(())
-    }
+        let expected = vars.get("CHILDREN_AGES")?;
+        assert_eq!(&output, expected);
 
-    #[test]
-    fn evaluate_with_explicit_vars() -> Result<()> {
-        let mut varmap = VariableMap::new();
-        varmap.insert("whatami".into(), "tea pot".into());
-
-        let token = json!["I am a {{whatami}}"];
-        let output = token.evaluate_tokens(&vec![&varmap])?;
-
-        assert_eq!(output, "I am a tea pot".to_string());
         Ok(())
     }
 }
