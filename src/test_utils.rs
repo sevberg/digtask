@@ -1,9 +1,7 @@
-use anyhow::{Error, Result};
-use futures::{executor, Future};
 use serde_json::json;
 use std::collections::HashMap;
 
-use crate::{executor::DigExecutor, step::common::StepEvaluationResult, vars::VariableSet};
+use crate::vars::VariableSet;
 
 pub fn variable_set_bob() -> VariableSet {
     let mut vars = VariableSet::new();
