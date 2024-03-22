@@ -21,7 +21,7 @@ use crate::executor::DigExecutor;
 #[command(version, about, long_about = None)]
 struct Args {
     /// The config file to load
-    #[arg(short, long, default_value = "requeue.yaml")]
+    #[arg(short, long, default_value = "dig.yaml")]
     source: String,
     /// The task to run
     #[arg(short, long, default_value = "default")]
