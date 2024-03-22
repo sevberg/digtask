@@ -63,6 +63,7 @@ impl VariableSet {
         }
     }
 
+    #[allow(dead_code)]
     pub fn parent(&self) -> Option<&VariableMap> {
         match self.stacked_vars.last() {
             Some(val) => Some(val.as_ref()),
