@@ -182,6 +182,7 @@ impl PreparedTask {
         let message = format!("TASK:{} -- {}", self.label, message).blue();
         println!("{}", message)
     }
+    #[allow(dead_code)]
     fn log_bad(&self, message: &str) {
         let message = format!("TASK:{} -- {}", self.label, message).red();
         println!("{}", message)
