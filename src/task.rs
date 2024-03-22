@@ -1,3 +1,5 @@
+use std::{fs, path::Path, time::SystemTime};
+
 use anyhow::Result;
 use async_recursion::async_recursion;
 use futures::future::join_all;
@@ -26,6 +28,7 @@ pub enum ForcingContext {
     NotForced,
     ExplicitlyForced,
     ParentIsForced,
+    EverythingForced,
 }
 
 #[derive(Deserialize, Debug, Clone, Copy)]
@@ -115,17 +118,35 @@ pub struct PreparedTask {
 }
 
 impl PreparedTask {
-    #[async_recursion(?Send)]
-    pub async fn evaluate(
+    fn get_latest_input(&self) -> Result<SystemTime> {
+        let mut last_modification = SystemTime::UNIX_EPOCH;
+        for path in self.inputs.iter() {
+            let file_modified = fs::metadata(path)?.modified()?;
+            last_modification = last_modification.max(file_modified);
+        }
+
+        Ok(last_modification)
+    }
+
+    fn get_earliest_output(&self) -> Result<SystemTime> {
+        let mut first_modification = SystemTime::now();
+        for path in self.outputs.iter() {
+            if Path::new(path).exists() {
+                let file_modified = fs::metadata(path)?.modified()?;
+                first_modification = first_modification.min(file_modified);
+            }
+        }
+
+        Ok(first_modification)
+    }
+
+    async fn do_evaluation(
         &mut self,
         config: &DigConfig,
         capture_output: bool,
         executor: &DigExecutor<'_>,
+        is_forced: bool,
     ) -> Result<Option<Vec<String>>> {
-        // TODO: Evaluate Inputs
-        // TODO: Evaluate Outputs
-        // TODO: Evaluate forcing
-
         self.log("Begin");
         let mut outputs = Vec::new();
 
@@ -167,6 +188,7 @@ impl PreparedTask {
                             subtask,
                             capture_output,
                             executor,
+                            is_forced,
                         ));
                     }
                     let subtask_results = join_all(subtask_futures.into_iter()).await;
@@ -200,12 +222,64 @@ impl PreparedTask {
         }
     }
 
+    #[async_recursion(?Send)]
+    pub async fn evaluate(
+        &mut self,
+        config: &DigConfig,
+        capture_output: bool,
+        executor: &DigExecutor<'_>,
+        forcing: ForcingContext,
+    ) -> Result<Option<Vec<String>>> {
+        // Handle Inputs/Outputs
+        let latest_input = self.get_latest_input()?;
+        let earliest_output = self.get_earliest_output()?;
+
+        // Handle Forcing
+        let is_forced = match forcing {
+            ForcingContext::EverythingForced => true,
+            ForcingContext::NotForced => match self.forcing {
+                ForcingBehaviour::Always => true,
+                _ => false,
+            },
+            ForcingContext::ExplicitlyForced => true,
+            ForcingContext::ParentIsForced => match self.forcing {
+                ForcingBehaviour::Always => true,
+                ForcingBehaviour::Inherit => true,
+                ForcingBehaviour::Never => false,
+            },
+        };
+
+        // Handle Skipping
+        let skip_reason = match is_forced {
+            true => None,
+            false => match earliest_output < latest_input {
+                true => Some("Outputs are up to date".to_string()),
+                false => None,
+            },
+        };
+
+        // Evaluate, if not skipped
+        let output = match skip_reason {
+            Some(reason) => {
+                self.log(format!("Skipping because {}", reason).as_str());
+                Ok(None)
+            }
+            None => {
+                self.do_evaluation(config, capture_output, executor, is_forced)
+                    .await
+            }
+        };
+
+        output
+    }
+
     async fn make_subtask_future(
         &self,
         config: &DigConfig,
         subtask: &PreparedTaskStep,
         capture_output: bool,
         executor: &DigExecutor<'_>,
+        is_forced: bool,
     ) -> Result<Option<Vec<String>>> {
         let subtask_config = config.get_task(&subtask.task)?;
         let mut subtask = subtask_config
@@ -216,7 +290,14 @@ impl PreparedTask {
                 executor,
             )
             .await?;
-        subtask.evaluate(config, capture_output, executor).await
+
+        let forcing = match is_forced {
+            true => ForcingContext::ParentIsForced,
+            false => ForcingContext::NotForced,
+        };
+        subtask
+            .evaluate(config, capture_output, executor, forcing)
+            .await
     }
 
     fn log(&self, message: &str) {
@@ -328,7 +409,10 @@ mod tests {
             testing_block_on!(ex, task.prepare("test", &vars, StackMode::EmptyLocals, &ex))?;
 
         let config = DigConfig::new();
-        let outputs = testing_block_on!(ex, prepared_task.evaluate(&config, true, &ex))?;
+        let outputs = testing_block_on!(
+            ex,
+            prepared_task.evaluate(&config, true, &ex, ForcingContext::NotForced)
+        )?;
 
         match outputs {
             None => bail!("Expected outputs not present"),
@@ -347,7 +431,10 @@ mod tests {
             testing_block_on!(ex, task.prepare("test", &vars, StackMode::EmptyLocals, &ex))?;
 
         let config = DigConfig::new();
-        let outputs = testing_block_on!(ex, prepared_task.evaluate(&config, true, &ex))?;
+        let outputs = testing_block_on!(
+            ex,
+            prepared_task.evaluate(&config, true, &ex, ForcingContext::NotForced)
+        )?;
 
         match outputs {
             None => bail!("Expected outputs not present"),
@@ -371,7 +458,10 @@ mod tests {
             main_task.prepare("test", &vars, StackMode::EmptyLocals, &ex)
         )?;
 
-        let outputs = testing_block_on!(ex, prepared_task.evaluate(&config, true, &ex))?;
+        let outputs = testing_block_on!(
+            ex,
+            prepared_task.evaluate(&config, true, &ex, ForcingContext::NotForced)
+        )?;
 
         match outputs {
             None => bail!("Expected outputs not present"),
@@ -398,7 +488,10 @@ mod tests {
             main_task.prepare("test", &vars, StackMode::EmptyLocals, &ex)
         )?;
 
-        let outputs = testing_block_on!(ex, prepared_task.evaluate(&config, true, &ex))?;
+        let outputs = testing_block_on!(
+            ex,
+            prepared_task.evaluate(&config, true, &ex, ForcingContext::NotForced)
+        )?;
 
         match outputs {
             None => bail!("Expected outputs not present"),

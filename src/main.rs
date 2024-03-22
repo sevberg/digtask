@@ -14,7 +14,7 @@ use config::DigConfig;
 use serde_json::json;
 use vars::{StackMode, VariableSet};
 
-use crate::executor::DigExecutor;
+use crate::{executor::DigExecutor, task::ForcingContext};
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -24,14 +24,20 @@ struct Args {
     #[arg(short, long, default_value = "dig.yaml")]
     source: String,
     /// The task to run
-    #[arg(short, long, default_value = "default")]
+    #[arg(default_value = "default")]
     task: String,
-    /// Variables to override in the executed task
+    /// Variables to override in the executed task. Can be given multiple times
     #[arg(short, long)]
     var: Vec<String>,
     /// Number of async "threads" to allow in parallel
     #[arg(short, long, default_value_t = 1)]
     processes: usize,
+    /// The called task should be forced to run (and subtasks which inherit)
+    #[arg(short, long, action)]
+    force_first: bool,
+    /// All tasks should be forced to run
+    #[arg(short = 'F', long, action)]
+    force_all: bool,
 }
 
 async fn evaluate_main_task(
@@ -49,15 +55,22 @@ async fn evaluate_main_task(
         }
     };
 
-    println!("{:?}", vars);
-    // println!("SEMAPHORES = {:?}", executor.limiter);
-
     // Begin execution
     let mut main_task = config
         .get_task(&user_args.task)?
         .prepare("main", &vars, StackMode::EmptyLocals, executor)
         .await?;
-    main_task.evaluate(&config, false, executor).await?;
+
+    let forcing = match user_args.force_all {
+        true => ForcingContext::EverythingForced,
+        false => match user_args.force_first {
+            true => ForcingContext::ExplicitlyForced,
+            false => ForcingContext::NotForced,
+        },
+    };
+    main_task
+        .evaluate(&config, false, executor, forcing)
+        .await?;
 
     Ok(())
 }
