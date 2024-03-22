@@ -7,13 +7,19 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.81"
+async-executor = "1.8.0"
+async-process = "2.1.0"
+async-recursion = "1.1.0"
 clap = { version = "4.5.2", features = ["derive"] }
 colored = "2.1.0"
+futures = "0.3.30"
 indexmap = { version = "2.2.5", features = ["serde"] }
 serde = { version = "1.0.197", features = ["derive"] }
 serde_json = "1.0.114"
 serde_yaml = "0.9.32"
+smol = "2.0.0"
 winnow = "0.6.5"
 
 [dev-dependencies]
+rstest = "0.18.2"
 winnow = { version = "0.6.5", features = [] }

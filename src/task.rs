@@ -1,11 +1,17 @@
 use anyhow::Result;
+use async_recursion::async_recursion;
+use futures::future::join_all;
 use serde::Deserialize;
 
 use crate::{
     config::RequeueConfig,
-    step::common::{StepConfig, StepEvaluationResult, StepMethods},
+    executor::DigExecutor,
+    step::{
+        common::{StepConfig, StepEvaluationResult, StepMethods},
+        task_step::PreparedTaskStep,
+    },
     token::TokenedJsonValue,
-    vars::{RawVariableMap, RawVariableMapTrait, VariableMap, VariableMapStack},
+    vars::{RawVariableMap, StackMode, VariableMap, VariableMapStack, VariableSet},
 };
 
 use colored::Colorize;
@@ -45,45 +51,36 @@ pub struct TaskConfig {
 }
 
 impl TaskConfig {
-    pub fn build_vars(
-        &self,
-        var_stack: &VariableMapStack,
-        var_overrides: &VariableMap,
-    ) -> Result<VariableMap> {
-        let task_vars = match &self.vars {
-            None => VariableMap::new(),
-            Some(rawvars) => rawvars.evaluate(var_stack, var_overrides, true)?,
-        };
-
-        Ok(task_vars)
-    }
-
-    pub fn prepare<'a>(
+    pub async fn prepare<'a>(
         &'a self,
         default_label: &str,
-        var_stack: &'a VariableMapStack,
-        var_overrides: &VariableMap,
+        vars: &VariableSet,
+        executor: &DigExecutor<'_>,
     ) -> Result<PreparedTask> {
-        let task_vars = self.build_vars(var_stack, var_overrides)?;
-        let mut task_var_stack = var_stack.clone();
-        task_var_stack.push(&task_vars);
+        let vars = match &self.vars {
+            None => vars.stack(StackMode::EmptyLocals),
+            Some(raw_vars) => {
+                vars.stack_raw_variables(raw_vars, StackMode::EmptyLocals, executor)
+                    .await?
+            }
+        };
 
         let label = match &self.label {
-            Some(val) => val.evaluate_tokens_to_string("label", &task_var_stack)?,
+            Some(val) => val.evaluate_tokens_to_string("label", &vars)?,
             None => default_label.to_string(),
         };
 
         let inputs = match &self.inputs {
             Some(val) => val
                 .iter()
-                .map(|x| x.evaluate_tokens_to_string("input path", &task_var_stack))
+                .map(|x| x.evaluate_tokens_to_string("input path", &vars))
                 .collect::<Result<Vec<_>, _>>()?,
             None => Vec::new(),
         };
         let outputs = match &self.outputs {
             Some(val) => val
                 .iter()
-                .map(|x| x.evaluate_tokens_to_string("output path", &task_var_stack))
+                .map(|x| x.evaluate_tokens_to_string("output path", &vars))
                 .collect::<Result<Vec<_>, _>>()?,
             None => Vec::new(),
         };
@@ -94,7 +91,7 @@ impl TaskConfig {
             inputs: inputs,
             outputs: outputs,
             silent: self.silent,
-            task_vars: task_vars,
+            vars: vars,
             forcing: self.forcing.clone(),
         };
         Ok(output)
@@ -108,12 +105,17 @@ pub struct PreparedTask {
     pub inputs: Vec<String>,
     pub outputs: Vec<String>,
     pub silent: bool,
-    pub task_vars: VariableMap,
+    pub vars: VariableSet,
     pub forcing: ForcingBehaviour,
 }
 
 impl PreparedTask {
-    pub fn evaluate(&mut self, var_stack: &VariableMapStack, config: &RequeueConfig) -> Result<()> {
+    #[async_recursion(?Send)]
+    pub async fn evaluate(
+        &mut self,
+        config: &RequeueConfig,
+        executor: &DigExecutor<'_>,
+    ) -> Result<()> {
         // TODO: Evaluate Inputs
         // TODO: Evaluate Outputs
         // TODO: Evaluate forcing
@@ -121,41 +123,59 @@ impl PreparedTask {
         self.log("Begin");
 
         for (step_i, step) in self.steps.iter().enumerate() {
-            let step_output = {
-                let mut temp_var_stack = var_stack.clone();
-                temp_var_stack.push(&self.task_vars);
+            let step_output = step.evaluate(step_i, &self.vars, &executor).await?;
 
-                step.evaluate(step_i, &temp_var_stack)
-            }?;
-
-            match step_output {
-                StepEvaluationResult::SubmitTasks(submittable_tasks) => {
-                    for submittable_task in submittable_tasks.iter() {
-                        let subtask_config = config.get_task(&submittable_task.task)?;
-                        let mut subtask = subtask_config.prepare(
-                            &submittable_task.task,
-                            var_stack,
-                            &submittable_task.vars,
-                        )?;
-                        subtask.evaluate(var_stack, config)?;
-                    }
-                }
-                StepEvaluationResult::SkippedDueToIfStatement(_) => (),
+            let subtasks = match step_output {
+                StepEvaluationResult::SubmitTasks(submittable_tasks) => Some(submittable_tasks),
+                StepEvaluationResult::SkippedDueToIfStatement(_) => None,
                 StepEvaluationResult::CompletedWithOutput(step_output) => {
                     // Check for storage
                     match step.get_store() {
                         Some(key) => {
-                            self.task_vars.insert(key.clone(), step_output);
+                            self.vars.insert(key.clone(), step_output);
+                            None
                         }
-                        None => (),
+                        None => None,
                     }
                 }
             };
+
+            // We drop the limiter at this point so as to not consume a Semaphore token while executing subtasks. Meanwhile,
+            // the current task will just be waiting...
+            match subtasks {
+                None => (),
+                Some(subtasks) => {
+                    let mut subtask_futures = Vec::new();
+                    for subtask in subtasks.iter() {
+                        subtask_futures.push(self.make_subtask_future(config, subtask, executor));
+                    }
+                    let outcomes = join_all(subtask_futures.into_iter()).await;
+                    for outcome in outcomes {
+                        match outcome {
+                            Ok(_) => (),
+                            Err(error) => return Err(error),
+                        }
+                    }
+                }
+            }
         }
 
         self.log("Finished");
 
         Ok(())
+    }
+
+    async fn make_subtask_future(
+        &self,
+        config: &RequeueConfig,
+        subtask: &PreparedTaskStep,
+        executor: &DigExecutor<'_>,
+    ) -> Result<()> {
+        let subtask_config = config.get_task(&subtask.task)?;
+        let mut subtask = subtask_config
+            .prepare(&subtask.task, &self.vars, executor)
+            .await?;
+        subtask.evaluate(config, executor).await
     }
 
     fn log(&self, message: &str) {

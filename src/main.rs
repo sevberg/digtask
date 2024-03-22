@@ -1,14 +1,20 @@
 mod config;
+mod executor;
 mod step;
 mod task;
 mod token;
 mod vars;
 
+#[cfg(test)]
+mod test_utils;
+
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use config::RequeueConfig;
 use serde_json::json;
-use vars::{no_vars, RawVariableMapTrait, VariableMap};
+use vars::{StackMode, VariableSet};
+
+use crate::executor::DigExecutor;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -18,14 +24,42 @@ struct Args {
     #[arg(short, long, default_value = "requeue.yaml")]
     source: String,
     /// The task to run
-    #[arg(short, long)]
+    #[arg(short, long, default_value = "default")]
     task: String,
     /// Variables to override in the executed task
     #[arg(short, long)]
     var: Vec<String>,
-    // /// Number of times to greet
-    // #[arg(short, long, default_value_t = 1)]
-    // count: u8,
+    /// Number of async "threads" to allow in parallel
+    #[arg(short, long, default_value_t = 1)]
+    processes: usize,
+}
+
+async fn evaluate_main_task(
+    user_args: Args,
+    config: RequeueConfig,
+    vars: VariableSet,
+    executor: &DigExecutor<'_>,
+) -> Result<()> {
+    // handle global variables
+    let vars = match &config.vars {
+        None => vars,
+        Some(raw_vars) => {
+            vars.stack_raw_variables(raw_vars, StackMode::CopyLocals, executor)
+                .await?
+        }
+    };
+
+    println!("{:?}", vars);
+    // println!("SEMAPHORES = {:?}", executor.limiter);
+
+    // Begin execution
+    let mut main_task = config
+        .get_task(&user_args.task)?
+        .prepare("main", &vars, executor)
+        .await?;
+    let output = main_task.evaluate(&config, executor).await?;
+
+    Ok(output)
 }
 
 fn main() -> Result<()> {
@@ -34,30 +68,24 @@ fn main() -> Result<()> {
     let config = RequeueConfig::load_yaml(&args.source)?;
 
     // handle overrides
-    let mut var_overrides = VariableMap::new();
+    let mut vars = VariableSet::new();
     for var in args.var.iter() {
         let (key, value) = var.split_once("=").ok_or(anyhow!(
             "A key value pair should be given as KEY=VALUE. Got '{}'",
             var
         ))?;
         let value = serde_json::from_str(value).unwrap_or(json!(value));
-        var_overrides.insert(key.to_string(), value);
+        vars.insert(key.to_string(), value);
     }
 
-    println!("{:?}", var_overrides);
-    // handle global variables
-    let global_vars = match &config.vars {
-        None => VariableMap::new(),
-        Some(rawvars) => rawvars.evaluate(&no_vars(), &var_overrides, true)?,
-    };
-    println!("{:?}", global_vars);
+    println!("{:?}", vars);
 
-    let main_task = config.get_task(&args.task)?;
+    // Initialize Async runtime
+    let executor = DigExecutor::new(args.processes);
 
-    let var_stack = vec![&global_vars];
-    main_task
-        .prepare("main", &var_stack, &var_overrides)?
-        .evaluate(&var_stack, &config)?;
+    // Evaluate main task
+    let future = evaluate_main_task(args, config, vars, &executor);
+    let output = smol::block_on((&executor.executor).run(future))?;
 
-    Ok(())
+    Ok(output)
 }
