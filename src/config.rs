@@ -23,6 +23,7 @@ pub struct RequeueConfig {
 }
 
 impl RequeueConfig {
+    #[allow(dead_code)]
     pub fn new() -> RequeueConfig {
         RequeueConfig {
             version: default_version(),
@@ -31,6 +32,7 @@ impl RequeueConfig {
         }
     }
 
+    #[allow(dead_code)]
     pub fn insert_raw_variable(&mut self, key: String, value: RawVariable) {
         match &mut self.vars {
             Some(vars) => {

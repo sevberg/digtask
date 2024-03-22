@@ -12,7 +12,7 @@ use crate::{
         task_step::PreparedTaskStep,
     },
     token::TokenedJsonValue,
-    vars::{RawVariableMap, StackMode, VariableMap, VariableMapStack, VariableSet},
+    vars::{RawVariableMap, StackMode, VariableSet},
 };
 
 use colored::Colorize;

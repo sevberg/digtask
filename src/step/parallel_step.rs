@@ -2,7 +2,6 @@ use crate::{executor::DigExecutor, vars::VariableSet};
 use anyhow::Result;
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
 
 use super::common::{SingularStepConfig, StepEvaluationResult, StepMethods};
 

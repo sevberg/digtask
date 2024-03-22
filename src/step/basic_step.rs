@@ -248,7 +248,6 @@ impl StepMethods for BasicStep {
 #[cfg(test)]
 mod test {
     use anyhow::bail;
-    use serde_json::json;
 
     use super::*;
     use crate::test_utils::*;
@@ -266,7 +265,7 @@ mod test {
         let vars = VariableSet::new();
         let output = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &ex))?;
         match output {
-            StepEvaluationResult::Completed(output) => (), // All good!
+            StepEvaluationResult::Completed(_) => (), // All good!
             _ => bail!("The step did not complete"),
         };
 
