@@ -10,7 +10,7 @@ mod test_utils;
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
-use config::RequeueConfig;
+use config::DigConfig;
 use serde_json::json;
 use vars::{StackMode, VariableSet};
 
@@ -36,7 +36,7 @@ struct Args {
 
 async fn evaluate_main_task(
     user_args: Args,
-    config: RequeueConfig,
+    config: DigConfig,
     vars: VariableSet,
     executor: &DigExecutor<'_>,
 ) -> Result<()> {
@@ -65,7 +65,7 @@ async fn evaluate_main_task(
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    let config = RequeueConfig::load_yaml(&args.source)?;
+    let config = DigConfig::load_yaml(&args.source)?;
 
     // handle overrides
     let mut vars = VariableSet::new();

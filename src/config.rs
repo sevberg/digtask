@@ -1,4 +1,4 @@
-use std::{borrow::BorrowMut, collections::BTreeMap};
+use std::collections::BTreeMap;
 
 use anyhow::{anyhow, Result};
 use serde::Deserialize;
@@ -15,17 +15,17 @@ fn default_version() -> String {
 }
 
 #[derive(Deserialize, Debug)]
-pub struct RequeueConfig {
+pub struct DigConfig {
     #[serde(default = "default_version")]
     pub version: String,
     pub vars: Option<RawVariableMap>,
     pub tasks: BTreeMap<String, TaskConfig>,
 }
 
-impl RequeueConfig {
+impl DigConfig {
     #[allow(dead_code)]
-    pub fn new() -> RequeueConfig {
-        RequeueConfig {
+    pub fn new() -> DigConfig {
+        DigConfig {
             version: default_version(),
             vars: None,
             tasks: BTreeMap::new(),
@@ -48,7 +48,7 @@ impl RequeueConfig {
 
     pub fn load_yaml(source: &String) -> Result<Self> {
         let f = std::fs::File::open(source)?;
-        let config: RequeueConfig = serde_yaml::from_reader(f)?;
+        let config: DigConfig = serde_yaml::from_reader(f)?;
         Ok(config)
     }
 

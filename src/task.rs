@@ -5,7 +5,7 @@ use serde::Deserialize;
 use serde_json::Value as JsonValue;
 
 use crate::{
-    config::RequeueConfig,
+    config::DigConfig,
     executor::DigExecutor,
     step::{
         common::{StepConfig, StepEvaluationResult, StepMethods},
@@ -118,7 +118,7 @@ impl PreparedTask {
     #[async_recursion(?Send)]
     pub async fn evaluate(
         &mut self,
-        config: &RequeueConfig,
+        config: &DigConfig,
         capture_output: bool,
         executor: &DigExecutor<'_>,
     ) -> Result<Option<Vec<String>>> {
@@ -202,7 +202,7 @@ impl PreparedTask {
 
     async fn make_subtask_future(
         &self,
-        config: &RequeueConfig,
+        config: &DigConfig,
         subtask: &PreparedTaskStep,
         capture_output: bool,
         executor: &DigExecutor<'_>,
@@ -327,7 +327,7 @@ mod tests {
         let mut prepared_task =
             testing_block_on!(ex, task.prepare("test", &vars, StackMode::EmptyLocals, &ex))?;
 
-        let config = RequeueConfig::new();
+        let config = DigConfig::new();
         let outputs = testing_block_on!(ex, prepared_task.evaluate(&config, true, &ex))?;
 
         match outputs {
@@ -346,7 +346,7 @@ mod tests {
         let mut prepared_task =
             testing_block_on!(ex, task.prepare("test", &vars, StackMode::EmptyLocals, &ex))?;
 
-        let config = RequeueConfig::new();
+        let config = DigConfig::new();
         let outputs = testing_block_on!(ex, prepared_task.evaluate(&config, true, &ex))?;
 
         match outputs {
@@ -360,7 +360,7 @@ mod tests {
     #[test]
     fn test_task_with_subtask() -> Result<()> {
         let vars = _make_vars();
-        let mut config = RequeueConfig::new();
+        let mut config = DigConfig::new();
         config
             .tasks
             .insert("prepare_country".into(), _make_task_prepare_country());
@@ -384,7 +384,7 @@ mod tests {
     #[test]
     fn test_task_with_mapped_subtasks() -> Result<()> {
         let vars = _make_vars();
-        let mut config = RequeueConfig::new();
+        let mut config = DigConfig::new();
         config
             .tasks
             .insert("prepare_country".into(), _make_task_prepare_country());
