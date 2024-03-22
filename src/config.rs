@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{borrow::BorrowMut, collections::BTreeMap};
 
 use anyhow::{anyhow, Result};
 use serde::Deserialize;
@@ -7,7 +7,7 @@ use serde_yaml;
 use crate::{
     // task::{ForcingContext, Task, TaskEvaluation},
     task::TaskConfig,
-    vars::RawVariableMap,
+    vars::{RawVariable, RawVariableMap},
 };
 
 fn default_version() -> String {
@@ -23,6 +23,27 @@ pub struct RequeueConfig {
 }
 
 impl RequeueConfig {
+    pub fn new() -> RequeueConfig {
+        RequeueConfig {
+            version: default_version(),
+            vars: None,
+            tasks: BTreeMap::new(),
+        }
+    }
+
+    pub fn insert_raw_variable(&mut self, key: String, value: RawVariable) {
+        match &mut self.vars {
+            Some(vars) => {
+                vars.insert(key, value);
+            }
+            None => {
+                let mut vars = RawVariableMap::new();
+                vars.insert(key, value);
+                self.vars = Some(vars);
+            }
+        }
+    }
+
     pub fn load_yaml(source: &String) -> Result<Self> {
         let f = std::fs::File::open(source)?;
         let config: RequeueConfig = serde_yaml::from_reader(f)?;

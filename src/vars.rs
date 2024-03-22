@@ -142,7 +142,12 @@ impl RawVariable {
         let output = match &self {
             RawVariable::Json(json_value) => json_value.evaluate_tokens(vars)?,
             RawVariable::Executable(command) => match command.evaluate(0, vars, executor).await? {
-                StepEvaluationResult::CompletedWithOutput(val) => val,
+                StepEvaluationResult::Completed(str_val) => {
+                    match serde_json::from_str::<JsonValue>(&str_val) {
+                        Ok(json_val) => json_val,
+                        Err(_) => JsonValue::String(str_val),
+                    }
+                }
                 _ => bail!("Command did not result in an output"),
             },
         };

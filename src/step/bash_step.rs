@@ -65,7 +65,6 @@ impl StepMethods for BashStep {
 #[cfg(test)]
 mod test {
     use anyhow::bail;
-    use serde_json::Value as JsonValue;
 
     use crate::testing_block_on;
 
@@ -85,10 +84,7 @@ mod test {
         let vars = VariableSet::new();
         let output = testing_block_on!(ex, bash_command_config.evaluate(0, &vars, &ex))?;
         match output {
-            StepEvaluationResult::CompletedWithOutput(output) => match output {
-                JsonValue::String(_) => (), // All good!
-                other => bail!("We expected a string. Got '{}'", other),
-            },
+            StepEvaluationResult::Completed(output) => (), // All good!
             _ => bail!("Expected an completion with output"),
         };
 

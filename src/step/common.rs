@@ -4,7 +4,6 @@ use crate::step::{bash_step::BashStep, python_step::PythonStep};
 use crate::vars::VariableSet;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
 
 use super::parallel_step::ParallelStepConfig;
 use super::task_step::{PreparedTaskStep, TaskStepConfig};
@@ -12,7 +11,7 @@ use super::task_step::{PreparedTaskStep, TaskStepConfig};
 #[derive(PartialEq, Debug)]
 pub enum StepEvaluationResult {
     SkippedDueToIfStatement((usize, String)),
-    CompletedWithOutput(JsonValue),
+    Completed(String),
     SubmitTasks(Vec<PreparedTaskStep>),
 }
 

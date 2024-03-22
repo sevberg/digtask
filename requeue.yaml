@@ -33,13 +33,13 @@ tasks:
 
   analyze_country:
     vars:
-      iso3: USA
+      iso3: GRB
     label: "analyze_country={{iso3}}"
     steps:
       - parallel:
-          - "sleep 5"
-          - "sleep 5"
-          - "sleep 5"
+          # - "sleep 5"
+          # - "sleep 5"
+          - "sleep 1"
           - task: prepare_country
       - 'echo "ANALYZING: {{iso3}}"'
 

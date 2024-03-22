@@ -238,14 +238,7 @@ impl StepMethods for BasicStep {
         match output.status.success() {
             true => {
                 let trimmed_data = stdout.trim();
-
-                let output = match serde_json::from_str::<JsonValue>(trimmed_data) {
-                    Ok(val) => val,
-                    Err(_) => trimmed_data.into(),
-                    // Err(err)=>panic!("STEP:{} -- {}", step_i, err.to_string())
-                };
-
-                Ok(StepEvaluationResult::CompletedWithOutput(output))
+                Ok(StepEvaluationResult::Completed(trimmed_data.to_string()))
             }
             false => Err(anyhow!("{}", stderr)),
         }
@@ -273,10 +266,7 @@ mod test {
         let vars = VariableSet::new();
         let output = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &ex))?;
         match output {
-            StepEvaluationResult::CompletedWithOutput(output) => match output {
-                JsonValue::String(_) => (), // All good!
-                other => bail!("We expected a string, not '{}'", other),
-            },
+            StepEvaluationResult::Completed(output) => (), // All good!
             _ => bail!("The step did not complete"),
         };
 
@@ -317,10 +307,7 @@ mod test {
 
         let vars = VariableSet::new();
         let output_dir = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &ex))?;
-        assert_eq!(
-            output_dir,
-            StepEvaluationResult::CompletedWithOutput(json!["/"])
-        );
+        assert_eq!(output_dir, StepEvaluationResult::Completed("/".to_string()));
 
         Ok(())
     }
@@ -347,7 +334,7 @@ mod test {
         let message = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &ex))?;
         assert_eq!(
             message,
-            StepEvaluationResult::CompletedWithOutput("IM_A_VARIABLE, but IM_A_dogs".into())
+            StepEvaluationResult::Completed("IM_A_VARIABLE, but IM_A_dogs".into())
         );
 
         Ok(())
@@ -399,10 +386,15 @@ mod test {
         let output = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &ex))?;
 
         match output {
-            StepEvaluationResult::CompletedWithOutput(output) => match output {
-                JsonValue::Number(_) => (), // We got an int, everything's fine
-                other => bail!("Expected an integer, got '{}'", other),
-            },
+            StepEvaluationResult::Completed(output) => {
+                match serde_json::from_str::<JsonValue>(&output) {
+                    Ok(val) => match val {
+                        JsonValue::Number(_) => (), // All good, we got a number
+                        other => bail!("We expected a number, but got '{:?}'", other),
+                    },
+                    Err(_) => bail!("Could not convert output to json"),
+                }
+            }
             _ => bail!("Did not get the correct result"),
         }
 
@@ -427,10 +419,15 @@ mod test {
         let output = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &ex))?;
 
         match output {
-            StepEvaluationResult::CompletedWithOutput(output) => match output {
-                JsonValue::Number(_) => (), // We got an int, everything's fine
-                other => bail!("Expected an integer, got '{}'", other),
-            },
+            StepEvaluationResult::Completed(output) => {
+                match serde_json::from_str::<JsonValue>(&output) {
+                    Ok(val) => match val {
+                        JsonValue::Number(_) => (), // All good, we got a number
+                        other => bail!("We expected a number, but got '{:?}'", other),
+                    },
+                    Err(_) => bail!("Could not convert output to json"),
+                }
+            }
             _ => bail!("Did not get the correct result"),
         }
 

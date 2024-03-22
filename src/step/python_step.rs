@@ -87,14 +87,19 @@ mod test {
 
         let output = testing_block_on!(ex, command_config.evaluate(0, &vars, &ex))?;
         match output {
-            StepEvaluationResult::CompletedWithOutput(output) => match output {
-                JsonValue::Number(val) => {
-                    assert!((val.as_f64().unwrap() - 4.123105625617661).abs() < 1e-6)
+            StepEvaluationResult::Completed(output) => {
+                match serde_json::from_str::<JsonValue>(&output) {
+                    Ok(val) => match val {
+                        JsonValue::Number(val) => {
+                            assert!((val.as_f64().unwrap() - 4.123105625617661).abs() < 1e-6)
+                        }
+                        other => bail!("We expected a number, but got '{:?}'", other),
+                    },
+                    Err(_) => bail!("Could not convert output to json"),
                 }
-                other => bail!("We expected a float. Got '{}'", other),
-            },
-            _ => bail!("Expected an completion with output"),
-        };
+            }
+            _ => bail!("Did not get the correct result"),
+        }
 
         Ok(())
     }

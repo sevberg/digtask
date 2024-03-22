@@ -55,11 +55,11 @@ async fn evaluate_main_task(
     // Begin execution
     let mut main_task = config
         .get_task(&user_args.task)?
-        .prepare("main", &vars, executor)
+        .prepare("main", &vars, StackMode::EmptyLocals, executor)
         .await?;
-    let output = main_task.evaluate(&config, executor).await?;
+    main_task.evaluate(&config, false, executor).await?;
 
-    Ok(output)
+    Ok(())
 }
 
 fn main() -> Result<()> {

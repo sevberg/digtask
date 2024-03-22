@@ -41,7 +41,7 @@ impl StepMethods for ParallelStepConfig {
         }
 
         match output.is_empty() {
-            true => Ok(StepEvaluationResult::CompletedWithOutput(JsonValue::Null)),
+            true => Ok(StepEvaluationResult::Completed("".to_string())),
             false => Ok(StepEvaluationResult::SubmitTasks(output)),
         }
     }
@@ -70,8 +70,8 @@ mod tests {
         let output = testing_block_on!(ex, step_config.evaluate(0, &vars, &ex))?;
 
         match output {
-            StepEvaluationResult::CompletedWithOutput(val) => {
-                assert_eq!(val, serde_json::Value::Null);
+            StepEvaluationResult::Completed(val) => {
+                assert_eq!(val, "".to_string());
             }
             other => bail!("Expected an empty completion, instead got '{:?}'", other),
         };
@@ -92,8 +92,8 @@ mod tests {
         let output = testing_block_on!(ex, step_config.evaluate(0, &vars, &ex))?;
 
         match output {
-            StepEvaluationResult::CompletedWithOutput(val) => {
-                assert_eq!(val, serde_json::Value::Null);
+            StepEvaluationResult::Completed(val) => {
+                assert_eq!(val, "".to_string());
             }
             other => bail!("Expected an empty completion, instead got '{:?}'", other),
         };
