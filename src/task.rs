@@ -121,7 +121,13 @@ impl PreparedTask {
     fn get_latest_input(&self) -> Result<SystemTime> {
         let mut last_modification = SystemTime::UNIX_EPOCH;
         for path in self.inputs.iter() {
-            let file_modified = fs::metadata(path)?.modified()?;
+            let file_modified = match fs::metadata(path) {
+                Ok(meta) => meta.modified()?,
+                Err(error) => {
+                    self.log_bad(format!("Couldn't access input file '{}'", path).as_str());
+                    return Err(error.into());
+                }
+            };
             last_modification = last_modification.max(file_modified);
         }
 
@@ -147,7 +153,6 @@ impl PreparedTask {
         executor: &DigExecutor<'_>,
         is_forced: bool,
     ) -> Result<Option<Vec<String>>> {
-        self.log("Begin");
         let mut outputs = Vec::new();
 
         for (step_i, step) in self.steps.iter().enumerate() {
@@ -230,6 +235,8 @@ impl PreparedTask {
         executor: &DigExecutor<'_>,
         forcing: ForcingContext,
     ) -> Result<Option<Vec<String>>> {
+        self.log("Begin");
+
         // Handle Inputs/Outputs
         let latest_input = self.get_latest_input()?;
         let earliest_output = self.get_earliest_output()?;
@@ -304,10 +311,9 @@ impl PreparedTask {
         let message = format!("TASK:{} -- {}", self.label, message).blue();
         println!("{}", message)
     }
-    #[allow(dead_code)]
     fn log_bad(&self, message: &str) {
         let message = format!("TASK:{} -- {}", self.label, message).red();
-        println!("{}", message)
+        eprintln!("{}", message)
     }
 }
 

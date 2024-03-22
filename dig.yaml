@@ -17,7 +17,7 @@ tasks:
     # default:
     vars:
       iso3: DEU
-    label: "prepare_country[{{iso3}},{{NAME}}]"
+    label: "prepare_country_{{iso3}}_{{NAME}}"
     steps:
       - "echo PREPARING: {{iso3}}"
       - "echo $(pwd)"
@@ -25,8 +25,8 @@ tasks:
         if:
           - '"dogs" = "{{NOW}}"'
       #   store: newvar
-    inputs:
-      - data/input_{{iso3}}.csv
+    # inputs:
+    #   - data/input_{{iso3}}.csv
     outputs:
       - data/prepared_{{iso3}}-{{NAME}}.output
     forcing: Inherit
@@ -34,7 +34,7 @@ tasks:
   analyze_country:
     vars:
       iso3: GRB
-    label: "analyze_country={{iso3}}"
+    label: "analyze_country_{{iso3}}"
     steps:
       - parallel:
           # - "sleep 5"
