@@ -3,7 +3,6 @@ use anyhow::{anyhow, Result};
 use async_process::Command;
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
 use std::{borrow::BorrowMut, collections::HashMap, path::Path, process::ExitStatus};
 
 use super::common::{StepEvaluationResult, StepMethods};
@@ -248,6 +247,7 @@ impl StepMethods for BasicStep {
 #[cfg(test)]
 mod test {
     use anyhow::bail;
+    use serde_json::Value as JsonValue;
 
     use super::*;
     use crate::test_utils::*;
