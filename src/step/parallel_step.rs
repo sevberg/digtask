@@ -121,29 +121,4 @@ mod tests {
 
         Ok(())
     }
-
-    // #[test]
-    // fn test_nested_parallel() -> Result<()> {
-    //     let step_config = ParallelStepConfig {
-    //         parallel: vec![StepConfig::Parallel(ParallelStepConfig {
-    //             parallel: vec![
-    //                 StepConfig::Simple("whoami".into()),
-    //                 StepConfig::Simple("pwd".into()),
-    //             ],
-    //         })],
-    //     };
-    //     let output = step_config.evaluate(0, &no_vars());
-
-    //     match output {
-    //         Ok(value) => bail!("Expected a failure, but instead got '{:?}'", value),
-    //         Err(error) => {
-    //             assert_eq!(
-    //                 error.to_string(),
-    //                 "A parallel step cannot have nested parallel steps"
-    //             )
-    //         }
-    //     };
-
-    //     Ok(())
-    // }
 }
