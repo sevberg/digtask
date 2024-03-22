@@ -105,7 +105,7 @@ mod tests {
         let step_config = ParallelStepConfig {
             parallel: vec![
                 SingularStepConfig::Simple("whoami".into()),
-                SingularStepConfig::Simple("_this_is_an_expected_error_".into()), // <- not a real command
+                SingularStepConfig::Simple(">&2 echo \"This is an expected error\"; exit 1".into()), // <- not a real command
             ],
         };
         let vars = VariableSet::new();
@@ -114,7 +114,7 @@ mod tests {
         match output {
             Ok(value) => bail!("Expected a failure, but instead got '{:?}'", value),
             Err(error) => {
-                let expected_error = "/bin/bash: _this_is_an_expected_error_: command not found";
+                let expected_error = "This is an expected error";
                 assert_eq!(error.to_string(), expected_error);
             }
         };
