@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::vars::VariableMapStack;
+use crate::{executor::DigExecutor, vars::VariableSet};
 
 use super::{
     basic_step::{BasicStep, RawCommandEntry},
@@ -41,10 +41,12 @@ impl StepMethods for BashStep {
     fn get_store(&self) -> Option<&String> {
         self.store.as_ref()
     }
-    fn evaluate(
+
+    async fn evaluate(
         &self,
         step_i: usize,
-        var_stack: &VariableMapStack,
+        vars: &VariableSet,
+        executor: &DigExecutor<'_>,
     ) -> Result<StepEvaluationResult> {
         // let executable = self.executable.evaluate(vars)?;
         BasicStep {
@@ -55,7 +57,8 @@ impl StepMethods for BashStep {
             r#if: self.r#if.clone(),
             store: self.store.clone(),
         }
-        .evaluate(step_i, var_stack)
+        .evaluate(step_i, vars, executor)
+        .await
     }
 }
 
@@ -64,7 +67,7 @@ mod test {
     use anyhow::bail;
     use serde_json::Value as JsonValue;
 
-    use crate::vars::no_vars;
+    use crate::testing_block_on;
 
     use super::*;
 
@@ -79,7 +82,8 @@ mod test {
             store: None,
         };
 
-        let output = bash_command_config.evaluate(0, &no_vars())?;
+        let vars = VariableSet::new();
+        let output = testing_block_on!(ex, bash_command_config.evaluate(0, &vars, &ex))?;
         match output {
             StepEvaluationResult::CompletedWithOutput(output) => match output {
                 JsonValue::String(_) => (), // All good!

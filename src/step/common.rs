@@ -1,6 +1,7 @@
+use crate::executor::DigExecutor;
 use crate::step::basic_step::BasicStep;
 use crate::step::{bash_step::BashStep, python_step::PythonStep};
-use crate::vars::VariableMapStack;
+use crate::vars::VariableSet;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -16,8 +17,12 @@ pub enum StepEvaluationResult {
 }
 
 pub trait StepMethods {
-    fn evaluate(&self, step_i: usize, var_stack: &VariableMapStack)
-        -> Result<StepEvaluationResult>;
+    async fn evaluate(
+        &self,
+        step_i: usize,
+        vars: &VariableSet,
+        executor: &DigExecutor<'_>,
+    ) -> Result<StepEvaluationResult>;
     fn get_store(&self) -> Option<&String> {
         None
     }
@@ -25,32 +30,59 @@ pub trait StepMethods {
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(untagged)]
-pub enum StepConfig {
+pub enum SingularStepConfig {
     Simple(String),
     Config(CommandConfig),
     Task(TaskStepConfig),
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum StepConfig {
+    Single(SingularStepConfig),
     Parallel(ParallelStepConfig),
+}
+
+impl StepMethods for SingularStepConfig {
+    fn get_store(&self) -> Option<&String> {
+        match &self {
+            SingularStepConfig::Simple(_) => None,
+            SingularStepConfig::Config(x) => x.get_store(),
+            SingularStepConfig::Task(x) => x.get_store(),
+        }
+    }
+    async fn evaluate(
+        &self,
+        step_i: usize,
+        vars: &VariableSet,
+        executor: &DigExecutor<'_>,
+    ) -> Result<StepEvaluationResult> {
+        match &self {
+            SingularStepConfig::Simple(x) => {
+                BashStep::new(x).evaluate(step_i, vars, executor).await
+            }
+            SingularStepConfig::Config(x) => x.evaluate(step_i, vars, executor).await,
+            SingularStepConfig::Task(x) => x.evaluate(step_i, vars, executor).await,
+        }
+    }
 }
 
 impl StepMethods for StepConfig {
     fn get_store(&self) -> Option<&String> {
         match &self {
-            StepConfig::Simple(_) => None,
-            StepConfig::Config(x) => x.get_store(),
-            StepConfig::Task(x) => x.get_store(),
+            StepConfig::Single(x) => x.get_store(),
             StepConfig::Parallel(x) => x.get_store(),
         }
     }
-    fn evaluate(
+    async fn evaluate(
         &self,
         step_i: usize,
-        var_stack: &VariableMapStack,
+        vars: &VariableSet,
+        executor: &DigExecutor<'_>,
     ) -> Result<StepEvaluationResult> {
         match &self {
-            StepConfig::Simple(x) => BashStep::new(x).evaluate(step_i, var_stack),
-            StepConfig::Config(x) => x.evaluate(step_i, var_stack),
-            StepConfig::Task(x) => x.evaluate(step_i, var_stack),
-            StepConfig::Parallel(x) => x.evaluate(step_i, var_stack),
+            StepConfig::Single(x) => x.evaluate(step_i, vars, executor).await,
+            StepConfig::Parallel(x) => x.evaluate(step_i, vars, executor).await,
         }
     }
 }
@@ -73,16 +105,16 @@ impl StepMethods for CommandConfig {
         }
     }
 
-    fn evaluate(
+    async fn evaluate(
         &self,
         step_i: usize,
-        var_stack: &VariableMapStack,
+        vars: &VariableSet,
+        executor: &DigExecutor<'_>,
     ) -> Result<StepEvaluationResult> {
         match &self {
-            CommandConfig::Basic(x) => x.evaluate(step_i, var_stack),
-            CommandConfig::Bash(x) => x.evaluate(step_i, var_stack),
-            CommandConfig::Python(x) => x.evaluate(step_i, var_stack),
-            // CommandConfig::Jq(x) => x.evaluate(var_stack),
+            CommandConfig::Basic(x) => x.evaluate(step_i, vars, executor).await,
+            CommandConfig::Bash(x) => x.evaluate(step_i, vars, executor).await,
+            CommandConfig::Python(x) => x.evaluate(step_i, vars, executor).await, // CommandConfig::Jq(x) => x.evaluate(var_stack, executor),
         }
     }
 }

@@ -63,13 +63,11 @@ impl VariableSet {
         }
     }
 
-    pub fn parent(&self) -> Result<&VariableMap> {
-        let parent_ref = match self.stacked_vars.last() {
-            Some(val) => val,
-            None => return Err(anyhow!("Variable stack is empty")),
-        };
-
-        Ok(parent_ref.as_ref())
+    pub fn parent(&self) -> Option<&VariableMap> {
+        match self.stacked_vars.last() {
+            Some(val) => Some(val.as_ref()),
+            None => return None,
+        }
     }
 
     pub fn stack(&self, mode: StackMode) -> Self {
@@ -87,7 +85,7 @@ impl VariableSet {
         }
     }
 
-    pub fn insert_local(&mut self, key: String, value: JsonValue) {
+    pub fn insert(&mut self, key: String, value: JsonValue) {
         self.local_vars.insert(key, value);
     }
 
@@ -118,7 +116,7 @@ impl VariableSet {
             match keyvalue {
                 None => (),
                 Some((key, value)) => {
-                    output_vars.insert_local(key, value);
+                    output_vars.insert(key, value);
                 }
             }
         }

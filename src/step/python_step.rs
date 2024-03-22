@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::vars::VariableMapStack;
+use crate::{executor::DigExecutor, vars::VariableSet};
 
 use super::{
     basic_step::{BasicStep, RawCommandEntry},
@@ -42,10 +42,11 @@ impl StepMethods for PythonStep {
     fn get_store(&self) -> Option<&String> {
         self.store.as_ref()
     }
-    fn evaluate(
+    async fn evaluate(
         &self,
         step_i: usize,
-        var_stack: &VariableMapStack,
+        vars: &VariableSet,
+        executor: &DigExecutor<'_>,
     ) -> Result<StepEvaluationResult> {
         // let executable = self.executable.evaluate(vars)?;
         BasicStep {
@@ -56,7 +57,8 @@ impl StepMethods for PythonStep {
             r#if: self.r#if.clone(),
             store: self.store.clone(),
         }
-        .evaluate(step_i, var_stack)
+        .evaluate(step_i, vars, executor)
+        .await
     }
 }
 
@@ -65,13 +67,13 @@ mod test {
     use anyhow::bail;
     use serde_json::Value as JsonValue;
 
-    use crate::vars::VariableMap;
+    use crate::testing_block_on;
 
     use super::*;
 
     #[test]
     fn test_usage() -> Result<()> {
-        let mut vars = VariableMap::new();
+        let mut vars = VariableSet::new();
         vars.insert("SOME_NUM".into(), 17.into());
 
         let command_config = PythonStep {
@@ -83,7 +85,7 @@ mod test {
             store: None,
         };
 
-        let output = command_config.evaluate(0, &vec![&vars])?;
+        let output = testing_block_on!(ex, command_config.evaluate(0, &vars, &ex))?;
         match output {
             StepEvaluationResult::CompletedWithOutput(output) => match output {
                 JsonValue::Number(val) => {

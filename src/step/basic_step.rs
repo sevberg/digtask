@@ -1,14 +1,10 @@
-use crate::{token::TokenedJsonValue, vars::VariableMapStack};
+use crate::{executor::DigExecutor, token::TokenedJsonValue, vars::VariableSet};
 use anyhow::{anyhow, Result};
+use async_process::Command;
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use std::{
-    borrow::BorrowMut,
-    collections::HashMap,
-    path::Path,
-    process::{Command, ExitStatus},
-};
+use std::{borrow::BorrowMut, collections::HashMap, path::Path, process::ExitStatus};
 
 use super::common::{StepEvaluationResult, StepMethods};
 
@@ -63,7 +59,7 @@ pub struct BasicStep {
 }
 
 impl BasicStep {
-    fn build_envs(&self, var_stack: &VariableMapStack) -> Result<Option<HashMap<String, String>>> {
+    fn build_envs(&self, vars: &VariableSet) -> Result<Option<HashMap<String, String>>> {
         let output = match &self.env {
             None => None,
             Some(envmap) => {
@@ -71,8 +67,8 @@ impl BasicStep {
                 envmap
                     .iter()
                     .map(|(key, val)| {
-                        let key = key.evaluate_tokens_to_string("env-key", var_stack)?;
-                        let val = val.evaluate_tokens_to_string("env-value", var_stack)?;
+                        let key = key.evaluate_tokens_to_string("env-key", vars)?;
+                        let val = val.evaluate_tokens_to_string("env-value", vars)?;
                         output_envmap.insert(key, val);
                         Ok(())
                     })
@@ -85,11 +81,11 @@ impl BasicStep {
         Ok(output)
     }
 
-    fn build_dir(&self, var_stack: &VariableMapStack) -> Result<Option<String>> {
+    fn build_dir(&self, vars: &VariableSet) -> Result<Option<String>> {
         let output = match &self.dir {
             None => None,
             Some(specified_dir) => {
-                let specified_dir = specified_dir.evaluate_tokens_to_string("dir", var_stack)?;
+                let specified_dir = specified_dir.evaluate_tokens_to_string("dir", vars)?;
                 let path = Path::new(specified_dir.as_str());
 
                 if !path.is_dir() {
@@ -102,10 +98,10 @@ impl BasicStep {
 
         Ok(output)
     }
-    fn build_command(&self, var_stack: &VariableMapStack) -> Result<(Command, String)> {
+    fn build_command(&self, vars: &VariableSet) -> Result<(Command, String)> {
         // Parse command entry
         let mut string_rep: Vec<String> = Vec::new();
-        let entry = self.entry.evaluate_tokens_to_string("command", var_stack)?;
+        let entry = self.entry.evaluate_tokens_to_string("command", vars)?;
         let entry_split = entry.split(" ").collect::<Vec<_>>();
         let (true_entry, initial_cmd) = entry_split
             .split_first()
@@ -123,14 +119,14 @@ impl BasicStep {
         match &self.cmd {
             RawCommandEntry::None => (),
             RawCommandEntry::Single(t) => {
-                let user_command = t.evaluate_tokens_to_string("command", var_stack)?;
+                let user_command = t.evaluate_tokens_to_string("command", vars)?;
                 command.arg(user_command.clone());
                 string_rep.push(user_command);
             }
             RawCommandEntry::Many(tokens) => {
                 let user_command_elements = tokens
                     .iter()
-                    .map(|t| t.evaluate_tokens_to_string("command", var_stack))
+                    .map(|t| t.evaluate_tokens_to_string("command", vars))
                     .collect::<Result<Vec<_>, _>>()?;
 
                 command.args(user_command_elements.clone());
@@ -143,18 +139,24 @@ impl BasicStep {
         Ok((command, string_rep))
     }
 
-    fn test_if_statement(
+    async fn test_if_statement(
         &self,
         statement: &String,
         env: Option<&HashMap<String, String>>,
         dir: Option<&String>,
+        executor: &DigExecutor<'_>,
     ) -> Result<ExitStatus> {
         let mut command = Command::new("bash");
         command.arg("-c");
         let _command = command.arg(format!("test {}", statement));
         contextualize_command(_command, env, dir);
 
-        let output = command.output()?;
+        // println!("LOCKING - {:?}", executor.limiter);
+        let lock = executor.limiter.acquire().await;
+        let output = command.output().await?;
+        drop(lock);
+        // println!("UNLOCKING");
+
         Ok(output.status)
     }
 }
@@ -164,13 +166,14 @@ impl StepMethods for BasicStep {
         self.store.as_ref()
     }
 
-    fn evaluate(
+    async fn evaluate(
         &self,
         step_i: usize,
-        var_stack: &VariableMapStack,
+        vars: &VariableSet,
+        executor: &DigExecutor<'_>,
     ) -> Result<StepEvaluationResult> {
-        let env = self.build_envs(var_stack)?;
-        let dir = self.build_dir(var_stack)?;
+        let env = self.build_envs(vars)?;
+        let dir = self.build_dir(vars)?;
 
         // Test If statements
         let exit_on_if = match &self.r#if {
@@ -178,8 +181,10 @@ impl StepMethods for BasicStep {
             Some(statements) => {
                 let mut output = None;
                 for (i, statement) in statements.iter().enumerate() {
-                    let statement = statement.evaluate_tokens_to_string("if-test", var_stack)?;
-                    let result = self.test_if_statement(&statement, env.as_ref(), dir.as_ref())?;
+                    let statement = statement.evaluate_tokens_to_string("if-test", vars)?;
+                    let result = self
+                        .test_if_statement(&statement, env.as_ref(), dir.as_ref(), executor)
+                        .await?;
                     if !result.success() {
                         output = Some((i + 1, statement));
                         break;
@@ -201,11 +206,15 @@ impl StepMethods for BasicStep {
         }
 
         // Execute Command
-        let (mut command, string_rep) = self.build_command(var_stack)?;
+        let (mut command, string_rep) = self.build_command(vars)?;
         contextualize_command(command.borrow_mut(), env.as_ref(), dir.as_ref());
         println!("STEP:{} -- {}", step_i, string_rep);
 
-        let output = command.output()?;
+        // println!("LOCKING - {:?}", executor.limiter);
+        let lock = executor.limiter.acquire().await;
+        let output = command.output().await?;
+        drop(lock);
+        // println!("UNLOCKING");
 
         let stdout = std::str::from_utf8(output.stdout.as_ref())
             .expect("Could not convert stdout to a UTF-8 string")
@@ -248,11 +257,8 @@ mod test {
     use anyhow::bail;
     use serde_json::json;
 
-    // use crate::vars::{VariableMap, VariableMapLike, NO_VARS};
-
-    use crate::vars::{no_vars, VariableMap};
-
     use super::*;
+    use crate::test_utils::*;
 
     #[test]
     fn test_whoami() -> Result<()> {
@@ -264,8 +270,8 @@ mod test {
             r#if: None,
             store: None,
         };
-
-        let output = cmdconfig.evaluate(0, &no_vars())?;
+        let vars = VariableSet::new();
+        let output = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &ex))?;
         match output {
             StepEvaluationResult::CompletedWithOutput(output) => match output {
                 JsonValue::String(_) => (), // All good!
@@ -288,7 +294,8 @@ mod test {
             store: None,
         };
 
-        let output = cmdconfig.evaluate(0, &no_vars());
+        let vars = VariableSet::new();
+        let output = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &ex));
         match output {
             Ok(val) => bail!("We expected a failure, but got '{:?}'", val),
             Err(error) => assert_eq!(error.to_string(), "No such file or directory (os error 2)"),
@@ -308,7 +315,8 @@ mod test {
             store: None,
         };
 
-        let output_dir = cmdconfig.evaluate(0, &no_vars())?;
+        let vars = VariableSet::new();
+        let output_dir = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &ex))?;
         assert_eq!(
             output_dir,
             StepEvaluationResult::CompletedWithOutput(json!["/"])
@@ -323,7 +331,7 @@ mod test {
         envmap.insert("IM_AN_ENV".into(), "IM_A_VARIABLE".into());
         envmap.insert("IM_A_{{KEY_1}}".into(), "IM_A_{{KEY_2}}".into());
 
-        let mut vars = VariableMap::new();
+        let mut vars = VariableSet::new();
         vars.insert("KEY_1".into(), "cats".into());
         vars.insert("KEY_2".into(), "dogs".into());
 
@@ -336,7 +344,7 @@ mod test {
             store: None,
         };
 
-        let message = cmdconfig.evaluate(0, &vec![&vars])?;
+        let message = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &ex))?;
         assert_eq!(
             message,
             StepEvaluationResult::CompletedWithOutput("IM_A_VARIABLE, but IM_A_dogs".into())
@@ -347,7 +355,7 @@ mod test {
 
     #[test]
     fn test_if_usage() -> Result<()> {
-        let mut vars = VariableMap::new();
+        let mut vars = VariableSet::new();
         vars.insert("KEY_1".into(), "cats".into());
         vars.insert("KEY_2".into(), "dogs".into());
 
@@ -364,7 +372,7 @@ mod test {
             store: None,
         };
 
-        let outcome = cmdconfig.evaluate(0, &vec![&vars])?;
+        let outcome = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &ex))?;
         match outcome {
             StepEvaluationResult::SkippedDueToIfStatement((i, statement)) => {
                 assert_eq!(i, 2);
@@ -387,7 +395,8 @@ mod test {
             store: None,
         };
 
-        let output = cmdconfig.evaluate(0, &no_vars())?;
+        let vars = VariableSet::new();
+        let output = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &ex))?;
 
         match output {
             StepEvaluationResult::CompletedWithOutput(output) => match output {
@@ -402,9 +411,9 @@ mod test {
 
     #[test]
     fn token_vars() -> Result<()> {
-        let mut varmap = VariableMap::new();
-        varmap.insert("hats".into(), "date".into());
-        varmap.insert("entry".into(), "bash".into());
+        let mut vars = VariableSet::new();
+        vars.insert("hats".into(), "date".into());
+        vars.insert("entry".into(), "bash".into());
 
         let cmdconfig = BasicStep {
             entry: "{{entry}}".into(),
@@ -415,7 +424,7 @@ mod test {
             store: None,
         };
 
-        let output = cmdconfig.evaluate(0, &vec![&varmap])?;
+        let output = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &ex))?;
 
         match output {
             StepEvaluationResult::CompletedWithOutput(output) => match output {

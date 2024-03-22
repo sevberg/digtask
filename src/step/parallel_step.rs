@@ -1,40 +1,42 @@
-use crate::vars::VariableMapStack;
-use anyhow::{anyhow, bail, Result};
+use crate::{executor::DigExecutor, vars::VariableSet};
+use anyhow::Result;
+use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
-use super::common::{StepConfig, StepEvaluationResult, StepMethods};
+use super::common::{SingularStepConfig, StepEvaluationResult, StepMethods};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ParallelStepConfig {
-    pub parallel: Vec<StepConfig>,
+    pub parallel: Vec<SingularStepConfig>,
 }
 
 impl StepMethods for ParallelStepConfig {
-    fn evaluate(
+    async fn evaluate(
         &self,
         step_i: usize,
-        var_stack: &VariableMapStack,
+        vars: &VariableSet,
+        executor: &DigExecutor<'_>,
     ) -> Result<StepEvaluationResult> {
-        let mut output = Vec::new();
+        let mut tasks = Vec::new();
         for (_, step) in self.parallel.iter().enumerate() {
-            let outcome = match step {
-                StepConfig::Parallel(_) => {
-                    Err(anyhow!("A parallel step cannot have nested parallel steps"))
-                }
-                other => match other.evaluate(step_i, var_stack)? {
-                    // Ok(result) => match result {
-                    StepEvaluationResult::SubmitTasks(tasks) => Ok(Some(tasks)),
-                    _ => Ok(None),
-                    // },
-                    // Err(error) => Err(error),
+            tasks.push(step.evaluate(step_i, vars, executor))
+        }
+        let task_outcomes = join_all(tasks).await;
+
+        let mut output = Vec::new();
+        for outcome in task_outcomes.into_iter() {
+            let outcome = match outcome {
+                Ok(result) => match result {
+                    StepEvaluationResult::SubmitTasks(tasks) => Some(tasks),
+                    _ => None,
                 },
+                Err(error) => return Err(error),
             };
 
             match outcome {
-                Ok(Some(tasks)) => output.extend(tasks),
-                Ok(None) => {}
-                Err(error) => return Err(error), // mention something about the parallel step index?
+                Some(tasks) => output.extend(tasks),
+                None => {}
             }
         }
 
@@ -47,7 +49,9 @@ impl StepMethods for ParallelStepConfig {
 
 #[cfg(test)]
 mod tests {
-    use crate::vars::no_vars;
+    use anyhow::bail;
+
+    use crate::testing_block_on;
 
     use super::*;
 
@@ -55,11 +59,12 @@ mod tests {
     fn test_parallel_bash_steps() -> Result<()> {
         let step_config = ParallelStepConfig {
             parallel: vec![
-                StepConfig::Simple("whoami".into()),
-                StepConfig::Simple("pwd".into()),
+                SingularStepConfig::Simple("whoami".into()),
+                SingularStepConfig::Simple("pwd".into()),
             ],
         };
-        let output = step_config.evaluate(0, &no_vars())?;
+        let vars = VariableSet::new();
+        let output = testing_block_on!(ex, step_config.evaluate(0, &vars, &ex))?;
 
         match output {
             StepEvaluationResult::CompletedWithOutput(val) => {
@@ -75,11 +80,12 @@ mod tests {
     fn test_parallel_with_failure() -> Result<()> {
         let step_config = ParallelStepConfig {
             parallel: vec![
-                StepConfig::Simple("whoami".into()),
-                StepConfig::Simple("_this_is_an_expected_error_".into()), // <- not a real command
+                SingularStepConfig::Simple("whoami".into()),
+                SingularStepConfig::Simple("_this_is_an_expected_error_".into()), // <- not a real command
             ],
         };
-        let output = step_config.evaluate(0, &no_vars());
+        let vars = VariableSet::new();
+        let output = testing_block_on!(ex, step_config.evaluate(0, &vars, &ex));
 
         match output {
             Ok(value) => bail!("Expected a failure, but instead got '{:?}'", value),
@@ -92,28 +98,28 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_nested_parallel() -> Result<()> {
-        let step_config = ParallelStepConfig {
-            parallel: vec![StepConfig::Parallel(ParallelStepConfig {
-                parallel: vec![
-                    StepConfig::Simple("whoami".into()),
-                    StepConfig::Simple("pwd".into()),
-                ],
-            })],
-        };
-        let output = step_config.evaluate(0, &no_vars());
+    // #[test]
+    // fn test_nested_parallel() -> Result<()> {
+    //     let step_config = ParallelStepConfig {
+    //         parallel: vec![StepConfig::Parallel(ParallelStepConfig {
+    //             parallel: vec![
+    //                 StepConfig::Simple("whoami".into()),
+    //                 StepConfig::Simple("pwd".into()),
+    //             ],
+    //         })],
+    //     };
+    //     let output = step_config.evaluate(0, &no_vars());
 
-        match output {
-            Ok(value) => bail!("Expected a failure, but instead got '{:?}'", value),
-            Err(error) => {
-                assert_eq!(
-                    error.to_string(),
-                    "A parallel step cannot have nested parallel steps"
-                )
-            }
-        };
+    //     match output {
+    //         Ok(value) => bail!("Expected a failure, but instead got '{:?}'", value),
+    //         Err(error) => {
+    //             assert_eq!(
+    //                 error.to_string(),
+    //                 "A parallel step cannot have nested parallel steps"
+    //             )
+    //         }
+    //     };
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 }

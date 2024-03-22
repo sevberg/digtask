@@ -1,6 +1,7 @@
 use crate::{
+    executor::DigExecutor,
     token::TokenedJsonValue,
-    vars::{no_overrides, RawVariableMap, RawVariableMapTrait, VariableMap, VariableMapStack},
+    vars::{RawVariableMap, StackMode, VariableSet},
 };
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
@@ -41,7 +42,7 @@ fn contextualize_command(
 }
 
 impl TaskStepConfig {
-    fn build_envs(&self, var_stack: &VariableMapStack) -> Result<Option<HashMap<String, String>>> {
+    fn build_envs(&self, vars: &VariableSet) -> Result<Option<HashMap<String, String>>> {
         let output = match &self.env {
             None => None,
             Some(envmap) => {
@@ -49,8 +50,8 @@ impl TaskStepConfig {
                 envmap
                     .iter()
                     .map(|(key, val)| {
-                        let key = key.evaluate_tokens_to_string("env-key", var_stack)?;
-                        let val = val.evaluate_tokens_to_string("env-value", var_stack)?;
+                        let key = key.evaluate_tokens_to_string("env-key", vars)?;
+                        let val = val.evaluate_tokens_to_string("env-value", vars)?;
                         output_envmap.insert(key, val);
                         Ok(())
                     })
@@ -63,11 +64,11 @@ impl TaskStepConfig {
         Ok(output)
     }
 
-    fn build_dir(&self, var_stack: &VariableMapStack) -> Result<Option<String>> {
+    fn build_dir(&self, vars: &VariableSet) -> Result<Option<String>> {
         let output = match &self.dir {
             None => None,
             Some(specified_dir) => {
-                let specified_dir = specified_dir.evaluate_tokens_to_string("dir", var_stack)?;
+                let specified_dir = specified_dir.evaluate_tokens_to_string("dir", vars)?;
                 let path = Path::new(specified_dir.as_str());
 
                 if !path.is_dir() {
@@ -81,20 +82,9 @@ impl TaskStepConfig {
         Ok(output)
     }
 
-    fn process_variables(&self, var_stack: &VariableMapStack) -> Result<VariableMap> {
-        let step_vars = match &self.vars {
-            None => (*var_stack.last().expect(
-                "A TaskStep should always have it's parent's vars as the last item in the var stack",
-            )).clone(),
-            Some(rawvars) => rawvars.evaluate(&var_stack, &no_overrides(), false)?,
-        };
-
-        Ok(step_vars)
-    }
-
     fn test_if_statement(
         &self,
-        var_stack: &VariableMapStack,
+        vars: &VariableSet,
         env: Option<&HashMap<String, String>>,
         dir: Option<&String>,
     ) -> Result<Option<(usize, String)>> {
@@ -104,7 +94,7 @@ impl TaskStepConfig {
             Some(statements) => {
                 let mut output = None;
                 for (i, statement) in statements.iter().enumerate() {
-                    let statement = statement.evaluate_tokens_to_string("if-test", var_stack)?;
+                    let statement = statement.evaluate_tokens_to_string("if-test", vars)?;
 
                     let mut command = Command::new("bash");
                     command.arg("-c");
@@ -131,8 +121,7 @@ impl TaskStepConfig {
     fn _prepare_subtasks(
         &self,
         step_i: usize,
-        step_vars: &VariableMap,
-        var_stack: &VariableMapStack,
+        vars: &VariableSet,
         env: Option<&HashMap<String, String>>,
         dir: Option<&String>,
         map_vars: Option<&Vec<(String, String)>>,
@@ -142,7 +131,7 @@ impl TaskStepConfig {
                 let task = PreparedTaskStep {
                     // Note we clone everything so that each task manages it's own data
                     task: self.task.clone(),
-                    vars: step_vars.clone(),
+                    vars: vars.clone(),
                     env: env.cloned(),
                     dir: dir.cloned(),
                     // over: self.over.clone(),
@@ -152,7 +141,7 @@ impl TaskStepConfig {
                     format!(
                         "Queueing Task {} - '{}'",
                         &task.task,
-                        serde_json::to_string(&task.vars)?,
+                        serde_json::to_string(&task.vars.local_vars)?,
                     ),
                 );
                 vec![task]
@@ -161,9 +150,9 @@ impl TaskStepConfig {
             Some(map_vars) => {
                 let mut map_vars = map_vars.clone();
                 match map_vars.pop() {
-                    None => self._prepare_subtasks(step_i, step_vars, var_stack, env, dir, None)?,
+                    None => self._prepare_subtasks(step_i, vars, env, dir, None)?,
                     Some((target_key, source_key)) => {
-                        let source_value_vec = match source_key.evaluate_tokens(var_stack)? {
+                        let source_value_vec = match source_key.evaluate_tokens(vars)? {
                             serde_json::Value::Array(x) => x.clone(),
                             serde_json::Value::Object(_) => {
                                 bail!("Unable to map over object variable '{}'", source_key)
@@ -173,13 +162,12 @@ impl TaskStepConfig {
 
                         let mut output = Vec::new();
                         for source_value in source_value_vec.into_iter() {
-                            let mut new_step_vars = step_vars.clone();
+                            let mut new_step_vars = vars.clone();
                             new_step_vars.insert(target_key.clone(), source_value);
 
                             let new_tasks = self._prepare_subtasks(
                                 step_i,
                                 &new_step_vars,
-                                var_stack,
                                 env,
                                 dir,
                                 Some(&map_vars),
@@ -198,26 +186,18 @@ impl TaskStepConfig {
     fn prepare_subtasks(
         &self,
         step_i: usize,
-        step_vars: &VariableMap,
-        var_stack: &VariableMapStack,
+        vars: &VariableSet,
         env: Option<&HashMap<String, String>>,
         dir: Option<&String>,
     ) -> Result<StepEvaluationResult> {
         let output = match &self.over {
             None => {
-                let tasks = self._prepare_subtasks(step_i, step_vars, var_stack, env, dir, None)?;
+                let tasks = self._prepare_subtasks(step_i, vars, env, dir, None)?;
                 StepEvaluationResult::SubmitTasks(tasks)
             }
             Some(map_over) => {
                 let map_vars = Vec::from_iter(map_over.clone().into_iter());
-                let tasks = self._prepare_subtasks(
-                    step_i,
-                    step_vars,
-                    var_stack,
-                    env,
-                    dir,
-                    Some(&map_vars),
-                )?;
+                let tasks = self._prepare_subtasks(step_i, vars, env, dir, Some(&map_vars))?;
                 StepEvaluationResult::SubmitTasks(tasks)
             }
         };
@@ -230,19 +210,24 @@ impl StepMethods for TaskStepConfig {
     fn get_store(&self) -> Option<&String> {
         None
     }
-    fn evaluate(
+    async fn evaluate(
         &self,
         step_i: usize,
-        var_stack: &VariableMapStack,
+        vars: &VariableSet,
+        executor: &DigExecutor<'_>,
     ) -> Result<StepEvaluationResult> {
-        let env = self.build_envs(var_stack)?;
-        let dir = self.build_dir(var_stack)?;
+        let vars = match &self.vars {
+            None => vars.stack(StackMode::CopyLocals),
+            Some(raw_vars) => {
+                vars.stack_raw_variables(&raw_vars, StackMode::EmptyLocals, executor)
+                    .await?
+            }
+        };
 
-        let mut var_stack = var_stack.clone();
-        let step_vars = self.process_variables(&var_stack)?;
-        var_stack.push(&step_vars);
+        let env = self.build_envs(&vars)?;
+        let dir = self.build_dir(&vars)?;
 
-        let exit_on_if = self.test_if_statement(&var_stack, env.as_ref(), dir.as_ref())?;
+        let exit_on_if = self.test_if_statement(&vars, env.as_ref(), dir.as_ref())?;
         let output = match exit_on_if {
             Some((if_stmt_id, if_stmt_str)) => {
                 self.log(
@@ -254,19 +239,17 @@ impl StepMethods for TaskStepConfig {
                 );
                 StepEvaluationResult::SkippedDueToIfStatement((if_stmt_id, if_stmt_str))
             }
-            None => {
-                self.prepare_subtasks(step_i, &step_vars, &var_stack, env.as_ref(), dir.as_ref())?
-            }
+            None => self.prepare_subtasks(step_i, &vars, env.as_ref(), dir.as_ref())?,
         };
 
         Ok(output)
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PreparedTaskStep {
     pub task: String,
-    pub vars: VariableMap,
+    pub vars: VariableSet,
     pub env: Option<HashMap<String, String>>,
     pub dir: Option<String>,
     // pub r#if: Option<Vec<String>>,
@@ -278,10 +261,12 @@ pub struct PreparedTaskStep {
 mod tests {
     use serde_json::json;
 
+    use crate::{testing_block_on, vars::VariableMap};
+
     use super::*;
 
-    fn _make_vars() -> VariableMap {
-        let mut output = VariableMap::new();
+    fn _make_vars() -> VariableSet {
+        let mut output = VariableSet::new();
         output.insert("key1".into(), json!(vec!["hats", "bats", "rats"]));
         output.insert("key2".into(), json!(17));
         output
@@ -306,17 +291,17 @@ mod tests {
             over: None,
         };
 
-        let namespace_vars = _make_vars();
-        let var_stack = vec![&namespace_vars];
+        let vars = _make_vars();
 
-        let output = task_config.evaluate(0, &var_stack)?;
+        let output = testing_block_on!(ex, task_config.evaluate(0, &vars, &ex))?;
 
         match output {
             StepEvaluationResult::SubmitTasks(mut tasks) => {
                 assert_eq!(tasks.len(), 1);
                 let task_def = tasks.pop().unwrap();
                 assert_eq!(task_def.task, "test_task");
-                assert_eq!(task_def.vars, namespace_vars);
+                assert_eq!(task_def.vars.parent().unwrap(), &vars.local_vars);
+                assert_eq!(task_def.vars.local_vars, vars.local_vars);
                 assert!(task_def.env.is_none());
                 assert!(task_def.dir.is_none());
                 Ok(())
@@ -342,17 +327,16 @@ mod tests {
             over: None,
         };
 
-        let namespace_vars = _make_vars();
-        let var_stack = vec![&namespace_vars];
-
-        let output = task_config.evaluate(0, &var_stack)?;
+        let vars = _make_vars();
+        let output = testing_block_on!(ex, task_config.evaluate(0, &vars, &ex))?;
 
         match output {
             StepEvaluationResult::SubmitTasks(mut tasks) => {
                 assert_eq!(tasks.len(), 1);
                 let task_def = tasks.pop().unwrap();
                 assert_eq!(task_def.task, "test_task");
-                assert_eq!(task_def.vars, namespace_vars);
+                assert_eq!(task_def.vars.parent().unwrap(), &vars.local_vars);
+                assert_eq!(task_def.vars.local_vars, vars.local_vars);
                 assert_eq!(task_def.env, Some(env));
                 assert_eq!(task_def.dir, Some(dir));
                 Ok(())
@@ -372,9 +356,8 @@ mod tests {
             over: None,
         };
 
-        let namespace_vars = _make_vars();
-        let var_stack = vec![&namespace_vars];
-        let output = task_config.evaluate(0, &var_stack)?;
+        let vars = _make_vars();
+        let output = testing_block_on!(ex, task_config.evaluate(0, &vars, &ex))?;
 
         match output {
             StepEvaluationResult::SkippedDueToIfStatement((statement_num, reason)) => {
@@ -397,17 +380,16 @@ mod tests {
             over: None,
         };
 
-        let namespace_vars = _make_vars();
-        let var_stack = vec![&namespace_vars];
-
-        let output = task_config.evaluate(0, &var_stack)?;
+        let vars = _make_vars();
+        let output = testing_block_on!(ex, task_config.evaluate(0, &vars, &ex))?;
 
         match output {
             StepEvaluationResult::SubmitTasks(mut tasks) => {
                 assert_eq!(tasks.len(), 1);
                 let task_def = tasks.pop().unwrap();
                 assert_eq!(task_def.task, "test_task");
-                assert!(task_def.vars.is_empty());
+                assert_eq!(task_def.vars.parent().unwrap(), &vars.local_vars);
+                assert!(task_def.vars.local_vars.is_empty());
                 assert!(task_def.env.is_none());
                 assert!(task_def.dir.is_none());
                 Ok(())
@@ -415,6 +397,7 @@ mod tests {
             other => bail!("Expected to 'SubmitTasks', got '{:?}'", other),
         }
     }
+
     #[test]
     fn test_loop_over() -> Result<()> {
         let task_config = TaskStepConfig {
@@ -430,18 +413,19 @@ mod tests {
             ),
         };
 
-        let namespace_vars = _make_vars();
-        let var_stack = vec![&namespace_vars];
-
-        let output = task_config.evaluate(0, &var_stack)?;
+        let vars = _make_vars();
+        let output = testing_block_on!(ex, task_config.evaluate(0, &vars, &ex))?;
 
         match output {
             StepEvaluationResult::SubmitTasks(mut tasks) => {
                 assert_eq!(tasks.len(), 3);
+
+                // Queued Task 1
                 let task_def = tasks.pop().unwrap();
                 assert_eq!(task_def.task, "test_task");
                 assert!(task_def.env.is_none());
                 assert!(task_def.dir.is_none());
+                assert_eq!(task_def.vars.parent().unwrap(), &vars.local_vars);
 
                 let expected_vars: VariableMap = vec![
                     // ("key1".to_string(), json!("")),
@@ -452,7 +436,34 @@ mod tests {
                 .into_iter()
                 .collect();
 
-                assert_eq!(task_def.vars, expected_vars);
+                assert_eq!(task_def.vars.local_vars, expected_vars);
+
+                // Queued Task 2
+                let task_def = tasks.pop().unwrap();
+                let expected_vars: VariableMap = vec![
+                    // ("key1".to_string(), json!("")),
+                    ("key2".to_string(), json!(17)),
+                    ("key3".to_string(), json!("bats")),
+                    ("key4".to_string(), json!(22)),
+                ]
+                .into_iter()
+                .collect();
+
+                assert_eq!(task_def.vars.local_vars, expected_vars);
+
+                // Queued Task 3
+                let task_def = tasks.pop().unwrap();
+                let expected_vars: VariableMap = vec![
+                    // ("key1".to_string(), json!("")),
+                    ("key2".to_string(), json!(17)),
+                    ("key3".to_string(), json!("hats")),
+                    ("key4".to_string(), json!(22)),
+                ]
+                .into_iter()
+                .collect();
+
+                assert_eq!(task_def.vars.local_vars, expected_vars);
+
                 Ok(())
             }
             other => bail!("Expected to 'SubmitTasks', got '{:?}'", other),
