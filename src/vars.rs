@@ -201,7 +201,7 @@ mod test {
         );
 
         // Stack raw variables
-        let mut vars = VariableSet::new();
+        let vars = VariableSet::new();
         let executor = DigExecutor::new(1);
         let future = vars.stack_raw_variables(&raw_var_map, StackMode::EmptyLocals, &executor);
         let evaluated = smol::block_on(executor.executor.run(future))?;
@@ -242,7 +242,7 @@ mod test {
         );
 
         // Stack raw variables
-        let mut vars = VariableSet::new();
+        let vars = VariableSet::new();
         let executor = DigExecutor::new(1);
         let future = vars.stack_raw_variables(&rawvars, StackMode::EmptyLocals, &executor);
         let evaluated = smol::block_on(executor.executor.run(future))?;
