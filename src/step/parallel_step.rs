@@ -49,7 +49,10 @@ impl StepMethods for ParallelStepConfig {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use anyhow::bail;
+    use rstest::rstest;
 
     use crate::testing_block_on;
 
@@ -61,6 +64,28 @@ mod tests {
             parallel: vec![
                 SingularStepConfig::Simple("whoami".into()),
                 SingularStepConfig::Simple("pwd".into()),
+            ],
+        };
+        let vars = VariableSet::new();
+        let output = testing_block_on!(ex, step_config.evaluate(0, &vars, &ex))?;
+
+        match output {
+            StepEvaluationResult::CompletedWithOutput(val) => {
+                assert_eq!(val, serde_json::Value::Null);
+            }
+            other => bail!("Expected an empty completion, instead got '{:?}'", other),
+        };
+
+        Ok(())
+    }
+
+    #[rstest]
+    #[timeout(Duration::from_millis(300))]
+    fn test_true_parallelism() -> Result<()> {
+        let step_config = ParallelStepConfig {
+            parallel: vec![
+                SingularStepConfig::Simple("sleep 0.2".into()),
+                SingularStepConfig::Simple("sleep 0.2".into()),
             ],
         };
         let vars = VariableSet::new();

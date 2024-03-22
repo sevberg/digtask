@@ -23,7 +23,7 @@ pub fn variable_set_bob() -> VariableSet {
 #[macro_export]
 macro_rules! testing_block_on {
     ( $executor:ident, $func:expr) => {{
-        let $executor = DigExecutor::new(1);
+        let $executor = DigExecutor::new(2);
         let future = $func;
 
         smol::block_on($executor.executor.run(future))
