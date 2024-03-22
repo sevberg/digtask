@@ -1,27 +1,42 @@
+use crate::executor::DigExecutor;
 use crate::step::common::{CommandConfig, StepEvaluationResult, StepMethods};
 use crate::token::TokenedJsonValue;
-use anyhow::{anyhow, bail, Error, Result};
+use anyhow::{anyhow, bail, Result};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::collections::HashMap as Map;
+use std::rc::Rc;
 
 pub type VariableMap = Map<String, JsonValue>;
-pub type VariableMapStack<'a> = Vec<&'a VariableMap>;
-pub trait VariableMapStackTrait {
-    // blahhhh
-    fn get_key(&self, key: &str) -> Result<&JsonValue>;
-}
-pub fn no_vars<'a>() -> VariableMapStack<'a> {
-    Vec::new()
-}
-pub fn no_overrides() -> VariableMap {
-    VariableMap::new()
+pub type VariableMapStack = Vec<Rc<VariableMap>>;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct VariableSet {
+    pub stacked_vars: VariableMapStack,
+    pub local_vars: VariableMap,
 }
 
-impl<'s> VariableMapStackTrait for VariableMapStack<'s> {
-    fn get_key(&self, key: &str) -> Result<&'s JsonValue> {
-        for vars in self.iter().rev() {
+#[derive(Clone, Copy)]
+pub enum StackMode {
+    EmptyLocals,
+    CopyLocals,
+}
+
+impl VariableSet {
+    pub fn new() -> Self {
+        VariableSet {
+            stacked_vars: Vec::new(),
+            local_vars: VariableMap::new(),
+        }
+    }
+
+    pub fn get(&self, key: &str) -> Result<&JsonValue> {
+        match self.get_from_locals(key) {
+            None => (),
+            Some(value) => return Ok(value),
+        }
+        for vars in self.stacked_vars.iter().rev() {
             match vars.get(key) {
                 Some(value) => {
                     return Ok(value);
@@ -29,7 +44,86 @@ impl<'s> VariableMapStackTrait for VariableMapStack<'s> {
                 None => (),
             }
         }
-        Err(anyhow!("Failed to insert key '{}'", key))
+        Err(anyhow!("Failed to get key '{}'", key))
+    }
+
+    pub fn get_from_locals(&self, key: &str) -> Option<&JsonValue> {
+        match self.local_vars.get(key) {
+            Some(value) => {
+                return Some(value);
+            }
+            None => None,
+        }
+    }
+
+    pub fn get_from_parent(&self, key: &str) -> Option<&JsonValue> {
+        match self.stacked_vars.last() {
+            Some(parent) => parent.get(key),
+            None => None,
+        }
+    }
+
+    pub fn parent(&self) -> Result<&VariableMap> {
+        let parent_ref = match self.stacked_vars.last() {
+            Some(val) => val,
+            None => return Err(anyhow!("Variable stack is empty")),
+        };
+
+        Ok(parent_ref.as_ref())
+    }
+
+    pub fn stack(&self, mode: StackMode) -> Self {
+        let local_vars = match mode {
+            StackMode::EmptyLocals => VariableMap::new(),
+            StackMode::CopyLocals => self.local_vars.clone(),
+        };
+
+        let mut stacked_vars = self.stacked_vars.clone();
+        stacked_vars.push(Rc::new(self.local_vars.clone()));
+
+        VariableSet {
+            stacked_vars,
+            local_vars,
+        }
+    }
+
+    pub fn insert_local(&mut self, key: String, value: JsonValue) {
+        self.local_vars.insert(key, value);
+    }
+
+    pub async fn stack_raw_variables(
+        &self,
+        raw_vars: &RawVariableMap,
+        stack_mode: StackMode,
+        executor: &DigExecutor<'_>,
+    ) -> Result<Self> {
+        let mut output_vars = self.stack(stack_mode);
+
+        for (keytoken, rawvalue) in raw_vars.iter() {
+            let keyvalue: Option<(String, JsonValue)> = {
+                match output_vars.get_from_parent(keytoken) {
+                    Some(value) => match &stack_mode {
+                        StackMode::EmptyLocals => Some((keytoken.clone(), value.clone())),
+                        StackMode::CopyLocals => None, // Should already be copied
+                    },
+                    None => {
+                        let key =
+                            keytoken.evaluate_tokens_to_string("variable key", &output_vars)?;
+                        let value = rawvalue.evaluate(&output_vars, executor).await?;
+                        Some((key, value))
+                    }
+                }
+            };
+
+            match keyvalue {
+                None => (),
+                Some((key, value)) => {
+                    output_vars.insert_local(key, value);
+                }
+            }
+        }
+
+        Ok(output_vars)
     }
 }
 
@@ -41,10 +135,14 @@ pub enum RawVariable {
 }
 
 impl RawVariable {
-    pub fn evaluate(&self, var_stack: &VariableMapStack) -> Result<JsonValue> {
+    pub async fn evaluate(
+        &self,
+        vars: &VariableSet,
+        executor: &DigExecutor<'_>,
+    ) -> Result<JsonValue> {
         let output = match &self {
-            RawVariable::Json(json_value) => json_value.evaluate_tokens(var_stack)?,
-            RawVariable::Executable(command) => match command.evaluate(0, var_stack)? {
+            RawVariable::Json(json_value) => json_value.evaluate_tokens(vars)?,
+            RawVariable::Executable(command) => match command.evaluate(0, vars, executor).await? {
                 StepEvaluationResult::CompletedWithOutput(val) => val,
                 _ => bail!("Command did not result in an output"),
             },
@@ -62,68 +160,11 @@ impl From<JsonValue> for RawVariable {
 
 pub type RawVariableMap = IndexMap<String, RawVariable>;
 
-pub trait RawVariableMapTrait {
-    fn evaluate(
-        &self,
-        var_stack: &VariableMapStack,
-        var_overrides: &VariableMap,
-        copy_all_overrides: bool, // existing_vars: Option<VariableMap>,
-    ) -> Result<VariableMap>;
-    fn as_option(&self) -> Option<&RawVariableMap>;
-}
-impl RawVariableMapTrait for RawVariableMap {
-    fn evaluate(
-        &self,
-        var_stack: &VariableMapStack,
-        var_overrides: &VariableMap,
-        copy_all_overrides: bool, // existing_vars: Option<VariableMap>,
-    ) -> Result<VariableMap> {
-        let mut output = match copy_all_overrides {
-            false => VariableMap::new(),
-            true => var_overrides.clone(),
-        };
-
-        for (keytoken, rawvalue) in self.iter() {
-            let keyvalue = {
-                match var_overrides.get(keytoken) {
-                    Some(val) => match copy_all_overrides {
-                        true => Ok::<Option<(String, JsonValue)>, Error>(None),
-                        false => Ok(Some((keytoken.clone(), val.clone()))),
-                    },
-                    None => {
-                        let mut _var_stack = var_stack.clone(); // TODO: Does this clone the underlying data, or just the pointers?
-                        _var_stack.push(&output);
-                        let key = match keytoken.evaluate_tokens(&_var_stack)? {
-                            JsonValue::String(val) => val,
-                            other => bail!("We expected a string, not '{}'", other),
-                        };
-                        let value = rawvalue.evaluate(&_var_stack)?;
-                        Ok(Some((key, value)))
-                    }
-                }
-            }?;
-
-            match keyvalue {
-                None => (),
-                Some((key, value)) => {
-                    output.insert(key.clone(), value);
-                }
-            }
-        }
-
-        Ok(output)
-    }
-
-    fn as_option(&self) -> Option<&RawVariableMap> {
-        Some(self)
-    }
-}
-
 #[cfg(test)]
 mod test {
+    use super::*;
     use crate::step::python_step::PythonStep;
 
-    use super::*;
     use anyhow::anyhow;
     use serde_json::json;
 
@@ -132,7 +173,7 @@ mod test {
     } //
 
     #[test]
-    fn evaluate_raw_variable_map() -> Result<()> {
+    fn raw_string_map() -> Result<()> {
         // Build Raw variable map
         let mut raw_var_map = RawVariableMap::new();
         raw_var_map.insert("fixed_int".into(), RawVariable::Json(json![22]));
@@ -160,28 +201,23 @@ mod test {
             RawVariable::Json(json![nested_token_map]),
         );
 
-        // Evaluate
-        let evaluated = raw_var_map.evaluate(&no_vars(), &no_overrides(), false)?;
+        // Stack raw variables
+        let mut vars = VariableSet::new();
+        let executor = DigExecutor::new(1);
+        let future = vars.stack_raw_variables(&raw_var_map, StackMode::EmptyLocals, &executor);
+        let evaluated = smol::block_on(executor.executor.run(future))?;
 
-        let result = evaluated
-            .get("fixed_int")
-            .ok_or(anyhow!("bad 'fixed_int'"))?;
+        // Assert outputs
+        let result = evaluated.get("fixed_int")?;
         assert_eq!(result, &json![22]);
 
-        let result = evaluated
-            .get("token_str")
-            .ok_or(anyhow!("bad 'token_str'"))?;
+        let result = evaluated.get("token_str")?;
         assert_eq!(result, &json!["papa loves mama"]);
 
-        let result = evaluated
-            .get("token_key_22")
-            .ok_or(anyhow!("bad 'token_str'"))?;
+        let result = evaluated.get("token_key_22")?;
         assert_eq!(result, &json![5]);
 
-        let result = match evaluated
-            .get("nested_token_map")
-            .ok_or(anyhow!("bad 'nested_key'"))?
-        {
+        let result = match evaluated.get("nested_token_map")? {
             JsonValue::Object(nested_result) => nested_result
                 .get("nested_key_mama")
                 .ok_or(anyhow!("bad 'nested_key'"))?,
@@ -198,7 +234,7 @@ mod test {
     }
 
     #[test]
-    fn test_command_var() -> Result<()> {
+    fn raw_command_map() -> Result<()> {
         let mut rawvars = RawVariableMap::new();
         rawvars.insert("fixed_key".into(), RawVariable::Json(json!["dyn_key"]));
         rawvars.insert(
@@ -206,11 +242,14 @@ mod test {
             RawVariable::Executable(CommandConfig::Python(PythonStep::new("print(\"19\")"))),
         );
 
-        let output = rawvars.evaluate(&no_vars(), &no_overrides(), false)?;
+        // Stack raw variables
+        let mut vars = VariableSet::new();
+        let executor = DigExecutor::new(1);
+        let future = vars.stack_raw_variables(&rawvars, StackMode::EmptyLocals, &executor);
+        let evaluated = smol::block_on(executor.executor.run(future))?;
 
-        let value = output
-            .get("dyn_key")
-            .ok_or(anyhow!("Expected 'dyn_key' to be available"))?;
+        // Assert outputs
+        let value = evaluated.get("dyn_key")?;
 
         assert_eq!(value, &json![19]);
 

@@ -159,7 +159,7 @@ mod test {
     use rstest::*;
     use serde_json::json;
 
-    use crate::vars::test_utils::*;
+    use crate::test_utils::*;
 
     #[test]
     fn test_multiline() -> Result<()> {
@@ -176,7 +176,7 @@ print(json.dumps({ \"{{NAME}}\": math.sqrt( {{AGE}} )}))"
         let expected = json!(
             "import math
 import json
-print(json.dumps({ \"bob\": math.sqrt( 43.0 )}))"
+print(json.dumps({ \"bob\": math.sqrt( 43.7 )}))"
         );
         assert_eq!(output, expected);
 
