@@ -7,3 +7,14 @@
 * At each level, variables are evaluated before "env" and "dir", so:
   * The global vars should not any references to environment variables which are not externally visible
   * Task vars will only be composable from it's parent's envs (for the main task, this means the global envs, but for subtask this refers to their parent)
+
+## WIP Features
+
+* **on_error**: When a task fails, give the option of crashing (default), ignoring, or running anotehr task
+* **includes**: Allow config files to be composed of other config files (i.e. 'namespaces')
+* **dot_env**:  Allow importing environment variables from a file BEFORE the global 'vars' are evaluated
+* **--list**: CLI command to list available tasks
+  * Add task config to allow hiding tasks
+* **--summary [TASK]**: A CLI command to print a description of a specified task
+* **run_if and skip_if**: Change 'if' configs to 'run_if', and implement the inverse 'skip_if'
+* **prevent duplication**: Keep track of executed tasks, and prevent duplicate runs (unless specifically allowed)
