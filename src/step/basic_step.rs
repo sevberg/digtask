@@ -9,7 +9,7 @@ use anyhow::{anyhow, Result};
 use async_process::Command;
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
-use std::{borrow::BorrowMut, collections::HashMap, path::Path, process::ExitStatus};
+use std::{borrow::BorrowMut, process::ExitStatus};
 
 use super::common::{contextualize_command, StepEvaluationResult, StepMethods};
 
@@ -45,45 +45,6 @@ pub struct BasicStep {
 }
 
 impl BasicStep {
-    fn build_envs(&self, vars: &VariableSet) -> Result<EnvConfig> {
-        let output = match &self.env {
-            None => None,
-            Some(envmap) => {
-                let mut output_envmap: HashMap<String, String> = HashMap::new();
-                envmap
-                    .iter()
-                    .map(|(key, val)| {
-                        let key = key.evaluate_tokens_to_string("env-key", vars)?;
-                        let val = val.evaluate_tokens_to_string("env-value", vars)?;
-                        output_envmap.insert(key, val);
-                        Ok(())
-                    })
-                    .collect::<Result<Vec<()>>>()?;
-
-                Some(output_envmap)
-            }
-        };
-
-        Ok(output)
-    }
-
-    fn build_dir(&self, vars: &VariableSet) -> Result<DirConfig> {
-        let output = match &self.dir {
-            None => None,
-            Some(specified_dir) => {
-                let specified_dir = specified_dir.evaluate_tokens_to_string("dir", vars)?;
-                let path = Path::new(specified_dir.as_str());
-
-                if !path.is_dir() {
-                    return Err(anyhow!("Invalid directory '{}'", specified_dir));
-                }
-
-                Some(specified_dir)
-            }
-        };
-
-        Ok(output)
-    }
     fn build_command(&self, vars: &VariableSet) -> Result<(Command, String)> {
         // Parse command entry
         let mut string_rep: Vec<String> = Vec::new();
@@ -234,6 +195,8 @@ impl StepMethods for BasicStep {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
+
     use anyhow::bail;
     use serde_json::Value as JsonValue;
 

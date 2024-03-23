@@ -19,10 +19,7 @@ pub struct TaskStepConfig {
     pub env: EnvConfig,
     pub dir: DirConfig,
     pub r#if: Option<Vec<String>>,
-    // pub store: Option<String>,
     pub over: Option<HashMap<String, String>>,
-    // #[serde(default = "default_inherit_parent_vars")]
-    // pub inherit_parent_vars: bool,
 }
 
 impl TaskStepConfig {
@@ -195,9 +192,6 @@ pub struct PreparedTaskStep {
     pub task: String,
     pub vars: VariableSet,
     pub context: RunContext,
-    // pub r#if: Option<Vec<String>>,
-    // pub store: Option<String>,
-    // pub over: Option<HashMap<String, String>>,
 }
 
 #[cfg(test)]
