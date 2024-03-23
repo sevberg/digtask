@@ -7,6 +7,7 @@ use serde::Deserialize;
 use serde_json::Value as JsonValue;
 
 use crate::{
+    common::default_false,
     config::{DigConfig, DirConfig, EnvConfig},
     executor::DigExecutor,
     run_context::RunContext,
@@ -19,10 +20,6 @@ use crate::{
 };
 
 use colored::Colorize;
-
-fn default_false() -> bool {
-    true
-}
 
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
 pub enum ForcingContext {
@@ -73,8 +70,7 @@ impl TaskConfig {
                     .await?
             }
         };
-        context.update_dir(&self.dir, &vars)?;
-        context.update_env(&self.env, &vars)?;
+        context.update(&self.env, &self.dir, self.silent, &vars)?;
 
         let label = match &self.label {
             Some(val) => val.evaluate_tokens_to_string("label", &vars)?,
@@ -101,7 +97,6 @@ impl TaskConfig {
             steps: self.steps.clone(),
             inputs: inputs,
             outputs: outputs,
-            silent: self.silent,
             vars: vars,
             forcing_behavior: self.forcing,
             context,
@@ -116,7 +111,6 @@ pub struct PreparedTask {
     pub steps: Vec<StepConfig>,
     pub inputs: Vec<String>,
     pub outputs: Vec<String>,
-    pub silent: bool,
     pub vars: VariableSet,
     pub forcing_behavior: ForcingBehaviour,
     pub context: RunContext,
@@ -339,7 +333,7 @@ mod tests {
             steps: vec!["echo PREPARING: {{iso3}}".into()],
             inputs: None,
             outputs: None,
-            silent: true,
+            silent: false,
             vars: Some(
                 vec![("iso3".to_string(), RawVariable::Json("DEU".into()))]
                     .into_iter()
@@ -362,6 +356,7 @@ mod tests {
                     dir: None,
                     r#if: None,
                     over: None,
+                    silent: false,
                 })),
                 StepConfig::Single(SingularStepConfig::Simple(
                     "echo ANALYZING: {{iso3}}".into(),
@@ -396,6 +391,7 @@ mod tests {
                             .into_iter()
                             .collect(),
                     ),
+                    silent: false,
                 },
             ))],
             inputs: None,

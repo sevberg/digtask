@@ -12,6 +12,7 @@ pub struct RunContext {
     pub forcing: ForcingContext,
     pub env: EnvConfig,
     pub dir: DirConfig,
+    pub silent: bool,
 }
 
 impl RunContext {
@@ -21,6 +22,7 @@ impl RunContext {
             forcing: ForcingContext::NotForced,
             env: None,
             dir: None,
+            silent: false,
         }
     }
 
@@ -49,10 +51,25 @@ impl RunContext {
             forcing,
             env: self.env.clone(),
             dir: self.dir.clone(),
+            silent: self.silent.clone(),
         }
     }
 
-    pub fn update_env(&mut self, env: &EnvConfig, vars: &VariableSet) -> Result<()> {
+    pub fn update(
+        &mut self,
+        env: &EnvConfig,
+        dir: &DirConfig,
+        silent: bool,
+        vars: &VariableSet,
+    ) -> Result<()> {
+        self.update_env(env, vars)?;
+        self.update_dir(dir, vars)?;
+        self.silent = self.silent || silent;
+
+        Ok(())
+    }
+
+    fn update_env(&mut self, env: &EnvConfig, vars: &VariableSet) -> Result<()> {
         let env = match env {
             None => None,
             Some(envmap) => {
@@ -84,7 +101,7 @@ impl RunContext {
         Ok(())
     }
 
-    pub fn update_dir(&mut self, dir: &DirConfig, vars: &VariableSet) -> Result<()> {
+    fn update_dir(&mut self, dir: &DirConfig, vars: &VariableSet) -> Result<()> {
         match dir {
             None => (),
             Some(specified_dir) => {

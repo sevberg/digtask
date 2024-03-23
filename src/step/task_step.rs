@@ -1,4 +1,5 @@
 use crate::{
+    common::default_false,
     config::{DirConfig, EnvConfig},
     executor::DigExecutor,
     run_context::RunContext,
@@ -20,6 +21,8 @@ pub struct TaskStepConfig {
     pub dir: DirConfig,
     pub r#if: Option<Vec<String>>,
     pub over: Option<HashMap<String, String>>,
+    #[serde(default = "default_false")]
+    pub silent: bool,
 }
 
 impl TaskStepConfig {
@@ -165,8 +168,7 @@ impl StepMethods for TaskStepConfig {
                     .await?
             }
         };
-        context.update_dir(&self.dir, &vars)?;
-        context.update_env(&self.env, &vars)?;
+        context.update(&self.env, &self.dir, self.silent, &vars)?;
 
         let exit_on_if = self.test_if_statement(&vars, &context, executor).await?;
         let output = match exit_on_if {
@@ -227,6 +229,7 @@ mod tests {
             dir: None,
             r#if: None,
             over: None,
+            silent: false,
         };
 
         let vars = _make_vars();
@@ -264,6 +267,7 @@ mod tests {
             dir: Some(dir.clone()),
             r#if: None,
             over: None,
+            silent: false,
         };
 
         let vars = _make_vars();
@@ -294,6 +298,7 @@ mod tests {
             dir: None,
             r#if: Some(vec!["\"cats\" = \"dogs\"".into()]),
             over: None,
+            silent: false,
         };
 
         let vars = _make_vars();
@@ -319,6 +324,7 @@ mod tests {
             dir: None,
             r#if: None,
             over: None,
+            silent: false,
         };
 
         let vars = _make_vars();
@@ -353,6 +359,7 @@ mod tests {
                     .into_iter()
                     .collect(),
             ),
+            silent: false,
         };
 
         let vars = _make_vars();

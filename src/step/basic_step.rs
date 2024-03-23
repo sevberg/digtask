@@ -1,4 +1,5 @@
 use crate::{
+    common::default_false,
     config::{DirConfig, EnvConfig},
     executor::DigExecutor,
     run_context::RunContext,
@@ -42,6 +43,8 @@ pub struct BasicStep {
     pub dir: DirConfig,
     pub r#if: Option<Vec<String>>,
     pub store: Option<String>,
+    #[serde(default = "default_false")]
+    pub silent: bool,
 }
 
 impl BasicStep {
@@ -120,8 +123,7 @@ impl StepMethods for BasicStep {
         executor: &DigExecutor<'_>,
     ) -> Result<StepEvaluationResult> {
         let mut context = context.clone();
-        context.update_dir(&self.dir, vars)?;
-        context.update_env(&self.env, vars)?;
+        context.update(&self.env, &self.dir, self.silent, &vars)?;
 
         // Test If statements
         let exit_on_if = match &self.r#if {
@@ -212,6 +214,7 @@ mod test {
             dir: None,
             r#if: None,
             store: None,
+            silent: false,
         };
         let vars = VariableSet::new();
         let context = RunContext::default();
@@ -233,6 +236,7 @@ mod test {
             dir: None,
             r#if: None,
             store: None,
+            silent: false,
         };
 
         let vars = VariableSet::new();
@@ -255,6 +259,7 @@ mod test {
             env: None,
             r#if: None,
             store: None,
+            silent: false,
         };
 
         let vars = VariableSet::new();
@@ -282,6 +287,7 @@ mod test {
             env: Some(envmap),
             r#if: None,
             store: None,
+            silent: false,
         };
 
         let context = RunContext::default();
@@ -311,6 +317,7 @@ mod test {
             env: None,
             r#if: Some(if_statements),
             store: None,
+            silent: false,
         };
 
         let context = RunContext::default();
@@ -335,6 +342,7 @@ mod test {
             dir: None,
             r#if: None,
             store: None,
+            silent: false,
         };
 
         let vars = VariableSet::new();
@@ -370,6 +378,7 @@ mod test {
             dir: None,
             r#if: None,
             store: None,
+            silent: false,
         };
 
         let context = RunContext::default();

@@ -2,7 +2,9 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::{executor::DigExecutor, run_context::RunContext, vars::VariableSet};
+use crate::{
+    common::default_false, executor::DigExecutor, run_context::RunContext, vars::VariableSet,
+};
 
 use super::{
     basic_step::{BasicStep, RawCommandEntry},
@@ -22,6 +24,8 @@ pub struct BashStep {
     pub dir: Option<String>,
     pub r#if: Option<Vec<String>>,
     pub store: Option<String>,
+    #[serde(default = "default_false")]
+    pub silent: bool,
 }
 
 impl BashStep {
@@ -33,6 +37,7 @@ impl BashStep {
             dir: None,
             r#if: None,
             store: None,
+            silent: false,
         }
     }
 }
@@ -57,6 +62,7 @@ impl StepMethods for BashStep {
             dir: self.dir.clone(),
             r#if: self.r#if.clone(),
             store: self.store.clone(),
+            silent: self.silent.clone(),
         }
         .evaluate(step_i, vars, context, executor)
         .await
@@ -80,6 +86,7 @@ mod test {
             dir: None,
             r#if: None,
             store: None,
+            silent: false,
         };
 
         let vars = VariableSet::new();
