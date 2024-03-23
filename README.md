@@ -10,6 +10,7 @@
 
 ## WIP Features
 
+* **improve errors** Root-out anyhow, and use thiserror+enums instead
 * **on_error**: When a task fails, give the option of crashing (default), ignoring, or running anotehr task
 * **includes**: Allow config files to be composed of other config files (i.e. 'namespaces')
 * **dot_env**:  Allow importing environment variables from a file BEFORE the global 'vars' are evaluated
