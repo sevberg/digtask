@@ -7,8 +7,9 @@ use serde::Deserialize;
 use serde_json::Value as JsonValue;
 
 use crate::{
-    config::DigConfig,
+    config::{DigConfig, DirConfig, EnvConfig},
     executor::DigExecutor,
+    run_context::RunContext,
     step::{
         common::{StepConfig, StepEvaluationResult, StepMethods},
         task_step::PreparedTaskStep,
@@ -23,7 +24,7 @@ fn default_false() -> bool {
     true
 }
 
-#[derive(Deserialize, Debug, Clone, Copy)]
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
 pub enum ForcingContext {
     NotForced,
     ExplicitlyForced,
@@ -52,6 +53,8 @@ pub struct TaskConfig {
     pub vars: Option<RawVariableMap>,
     #[serde(default = "default_forcing")]
     pub forcing: ForcingBehaviour,
+    pub env: EnvConfig,
+    pub dir: DirConfig,
 }
 
 impl TaskConfig {
@@ -60,18 +63,18 @@ impl TaskConfig {
         default_label: &str,
         vars: &VariableSet,
         stack_mode: StackMode,
+        mut context: RunContext,
         executor: &DigExecutor<'_>,
     ) -> Result<PreparedTask> {
-        // dbg!(vars);
         let vars = match &self.vars {
             None => vars.stack(stack_mode),
             Some(raw_vars) => {
-                vars.stack_raw_variables(raw_vars, stack_mode, executor)
+                vars.stack_raw_variables(raw_vars, stack_mode, &context, executor)
                     .await?
             }
         };
-
-        // dbg!(&vars);
+        context.update_dir(&self.dir, &vars)?;
+        context.update_env(&self.env, &vars)?;
 
         let label = match &self.label {
             Some(val) => val.evaluate_tokens_to_string("label", &vars)?,
@@ -100,7 +103,8 @@ impl TaskConfig {
             outputs: outputs,
             silent: self.silent,
             vars: vars,
-            forcing: self.forcing.clone(),
+            forcing_behavior: self.forcing,
+            context,
         };
         Ok(output)
     }
@@ -114,7 +118,8 @@ pub struct PreparedTask {
     pub outputs: Vec<String>,
     pub silent: bool,
     pub vars: VariableSet,
-    pub forcing: ForcingBehaviour,
+    pub forcing_behavior: ForcingBehaviour,
+    pub context: RunContext,
 }
 
 impl PreparedTask {
@@ -151,12 +156,13 @@ impl PreparedTask {
         config: &DigConfig,
         capture_output: bool,
         executor: &DigExecutor<'_>,
-        is_forced: bool,
     ) -> Result<Option<Vec<String>>> {
         let mut outputs = Vec::new();
 
         for (step_i, step) in self.steps.iter().enumerate() {
-            let step_output = step.evaluate(step_i, &self.vars, &executor).await?;
+            let step_output = step
+                .evaluate(step_i, &self.vars, &self.context, &executor)
+                .await?;
 
             let subtasks = match step_output {
                 StepEvaluationResult::SubmitTasks(submittable_tasks) => Some(submittable_tasks),
@@ -193,7 +199,6 @@ impl PreparedTask {
                             subtask,
                             capture_output,
                             executor,
-                            is_forced,
                         ));
                     }
                     let subtask_results = join_all(subtask_futures.into_iter()).await;
@@ -233,7 +238,6 @@ impl PreparedTask {
         config: &DigConfig,
         capture_output: bool,
         executor: &DigExecutor<'_>,
-        forcing: ForcingContext,
     ) -> Result<Option<Vec<String>>> {
         self.log("Begin");
 
@@ -242,14 +246,14 @@ impl PreparedTask {
         let earliest_output = self.get_earliest_output()?;
 
         // Handle Forcing
-        let is_forced = match forcing {
+        let is_forced = match self.context.forcing {
             ForcingContext::EverythingForced => true,
-            ForcingContext::NotForced => match self.forcing {
+            ForcingContext::NotForced => match self.forcing_behavior {
                 ForcingBehaviour::Always => true,
                 _ => false,
             },
             ForcingContext::ExplicitlyForced => true,
-            ForcingContext::ParentIsForced => match self.forcing {
+            ForcingContext::ParentIsForced => match self.forcing_behavior {
                 ForcingBehaviour::Always => true,
                 ForcingBehaviour::Inherit => true,
                 ForcingBehaviour::Never => false,
@@ -271,10 +275,7 @@ impl PreparedTask {
                 self.log(format!("Skipping because {}", reason).as_str());
                 Ok(None)
             }
-            None => {
-                self.do_evaluation(config, capture_output, executor, is_forced)
-                    .await
-            }
+            None => self.do_evaluation(config, capture_output, executor).await,
         };
 
         output
@@ -286,25 +287,20 @@ impl PreparedTask {
         subtask: &PreparedTaskStep,
         capture_output: bool,
         executor: &DigExecutor<'_>,
-        is_forced: bool,
     ) -> Result<Option<Vec<String>>> {
+        let subtask_context = self.context.child_context();
         let subtask_config = config.get_task(&subtask.task)?;
         let mut subtask = subtask_config
             .prepare(
                 &subtask.task,
                 &subtask.vars,
                 StackMode::EmptyLocals,
+                subtask_context,
                 executor,
             )
             .await?;
 
-        let forcing = match is_forced {
-            true => ForcingContext::ParentIsForced,
-            false => ForcingContext::NotForced,
-        };
-        subtask
-            .evaluate(config, capture_output, executor, forcing)
-            .await
+        subtask.evaluate(config, capture_output, executor).await
     }
 
     fn log(&self, message: &str) {
@@ -333,15 +329,14 @@ mod tests {
     fn _make_vars() -> VariableSet {
         let mut output = VariableSet::new();
         output.insert("COUNTRIES".into(), json!(vec!["ITA", "USA", "TRY"]));
+        output.insert("NAME".into(), json!("batman"));
         output
     }
 
     fn _make_task_prepare_country() -> TaskConfig {
         TaskConfig {
             label: Some("prepare_country".into()),
-            steps: vec![StepConfig::Single(SingularStepConfig::Simple(
-                "echo PREPARING: {{iso3}}".into(),
-            ))],
+            steps: vec!["echo PREPARING: {{iso3}}".into()],
             inputs: None,
             outputs: None,
             silent: true,
@@ -351,6 +346,8 @@ mod tests {
                     .collect(),
             ),
             forcing: ForcingBehaviour::Inherit,
+            env: None,
+            dir: None,
         }
     }
 
@@ -379,6 +376,8 @@ mod tests {
                     .collect(),
             ),
             forcing: ForcingBehaviour::Inherit,
+            env: None,
+            dir: None,
         }
     }
 
@@ -404,6 +403,8 @@ mod tests {
             silent: true,
             vars: None,
             forcing: ForcingBehaviour::Inherit,
+            env: None,
+            dir: None,
         }
     }
 
@@ -411,14 +412,14 @@ mod tests {
     fn test_task() -> Result<()> {
         let vars = _make_vars();
         let task = _make_task_prepare_country();
-        let mut prepared_task =
-            testing_block_on!(ex, task.prepare("test", &vars, StackMode::EmptyLocals, &ex))?;
+        let context = RunContext::default();
+        let mut prepared_task = testing_block_on!(
+            ex,
+            task.prepare("test", &vars, StackMode::EmptyLocals, context, &ex)
+        )?;
 
         let config = DigConfig::new();
-        let outputs = testing_block_on!(
-            ex,
-            prepared_task.evaluate(&config, true, &ex, ForcingContext::NotForced)
-        )?;
+        let outputs = testing_block_on!(ex, prepared_task.evaluate(&config, true, &ex))?;
 
         match outputs {
             None => bail!("Expected outputs not present"),
@@ -433,14 +434,14 @@ mod tests {
         let mut vars = _make_vars();
         vars.insert("iso3".into(), json!("MEX"));
         let task = _make_task_prepare_country();
-        let mut prepared_task =
-            testing_block_on!(ex, task.prepare("test", &vars, StackMode::EmptyLocals, &ex))?;
+        let context = RunContext::default();
+        let mut prepared_task = testing_block_on!(
+            ex,
+            task.prepare("test", &vars, StackMode::EmptyLocals, context, &ex)
+        )?;
 
         let config = DigConfig::new();
-        let outputs = testing_block_on!(
-            ex,
-            prepared_task.evaluate(&config, true, &ex, ForcingContext::NotForced)
-        )?;
+        let outputs = testing_block_on!(ex, prepared_task.evaluate(&config, true, &ex))?;
 
         match outputs {
             None => bail!("Expected outputs not present"),
@@ -459,15 +460,13 @@ mod tests {
             .insert("prepare_country".into(), _make_task_prepare_country());
         let main_task = _make_task_analyze_country();
 
+        let context = RunContext::default();
         let mut prepared_task = testing_block_on!(
             ex,
-            main_task.prepare("test", &vars, StackMode::EmptyLocals, &ex)
+            main_task.prepare("test", &vars, StackMode::EmptyLocals, context, &ex)
         )?;
 
-        let outputs = testing_block_on!(
-            ex,
-            prepared_task.evaluate(&config, true, &ex, ForcingContext::NotForced)
-        )?;
+        let outputs = testing_block_on!(ex, prepared_task.evaluate(&config, true, &ex))?;
 
         match outputs {
             None => bail!("Expected outputs not present"),
@@ -489,15 +488,13 @@ mod tests {
             .insert("analyze_country".into(), _make_task_analyze_country());
         let main_task = _make_task_analyze_all_countries();
 
+        let context = RunContext::default();
         let mut prepared_task = testing_block_on!(
             ex,
-            main_task.prepare("test", &vars, StackMode::EmptyLocals, &ex)
+            main_task.prepare("test", &vars, StackMode::EmptyLocals, context, &ex)
         )?;
 
-        let outputs = testing_block_on!(
-            ex,
-            prepared_task.evaluate(&config, true, &ex, ForcingContext::NotForced)
-        )?;
+        let outputs = testing_block_on!(ex, prepared_task.evaluate(&config, true, &ex))?;
 
         match outputs {
             None => bail!("Expected outputs not present"),
@@ -512,6 +509,47 @@ mod tests {
                     "ANALYZING: TRY"
                 ]
             ),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_task_with_dir_env() -> Result<()> {
+        let vars = _make_vars();
+
+        let task = TaskConfig {
+            label: Some("dir_env".into()),
+            steps: vec!["echo \"I am the ${SOME_ENV}\"".into(), "pwd".into()],
+            inputs: None,
+            outputs: None,
+            silent: true,
+            vars: Some(
+                vec![("iso3".to_string(), RawVariable::Json("DEU".into()))]
+                    .into_iter()
+                    .collect(),
+            ),
+            forcing: ForcingBehaviour::Inherit,
+            env: Some(
+                vec![("SOME_ENV".to_string(), "{{NAME}}".into())]
+                    .into_iter()
+                    .collect(),
+            ),
+            dir: Some("/".into()),
+        };
+
+        let context = RunContext::default();
+        let mut prepared_task = testing_block_on!(
+            ex,
+            task.prepare("test", &vars, StackMode::EmptyLocals, context, &ex)
+        )?;
+
+        let config = DigConfig::new();
+        let outputs = testing_block_on!(ex, prepared_task.evaluate(&config, true, &ex))?;
+
+        match outputs {
+            None => bail!("Expected outputs not present"),
+            Some(outputs) => assert_eq!(outputs, vec!["I am the batman", "/"]),
         }
 
         Ok(())

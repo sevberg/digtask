@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::{executor::DigExecutor, vars::VariableSet};
+use crate::{executor::DigExecutor, run_context::RunContext, vars::VariableSet};
 
 use super::{
     basic_step::{BasicStep, RawCommandEntry},
@@ -46,6 +46,7 @@ impl StepMethods for BashStep {
         &self,
         step_i: usize,
         vars: &VariableSet,
+        context: &RunContext,
         executor: &DigExecutor<'_>,
     ) -> Result<StepEvaluationResult> {
         // let executable = self.executable.evaluate(vars)?;
@@ -57,7 +58,7 @@ impl StepMethods for BashStep {
             r#if: self.r#if.clone(),
             store: self.store.clone(),
         }
-        .evaluate(step_i, vars, executor)
+        .evaluate(step_i, vars, context, executor)
         .await
     }
 }
@@ -82,7 +83,8 @@ mod test {
         };
 
         let vars = VariableSet::new();
-        let output = testing_block_on!(ex, bash_command_config.evaluate(0, &vars, &ex))?;
+        let context = RunContext::default();
+        let output = testing_block_on!(ex, bash_command_config.evaluate(0, &vars, &context, &ex))?;
         match output {
             StepEvaluationResult::Completed(_) => (), // All good!
             _ => bail!("Expected an completion with output"),

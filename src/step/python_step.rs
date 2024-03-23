@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::{executor::DigExecutor, vars::VariableSet};
+use crate::{executor::DigExecutor, run_context::RunContext, vars::VariableSet};
 
 use super::{
     basic_step::{BasicStep, RawCommandEntry},
@@ -46,6 +46,7 @@ impl StepMethods for PythonStep {
         &self,
         step_i: usize,
         vars: &VariableSet,
+        context: &RunContext,
         executor: &DigExecutor<'_>,
     ) -> Result<StepEvaluationResult> {
         // let executable = self.executable.evaluate(vars)?;
@@ -57,7 +58,7 @@ impl StepMethods for PythonStep {
             r#if: self.r#if.clone(),
             store: self.store.clone(),
         }
-        .evaluate(step_i, vars, executor)
+        .evaluate(step_i, vars, context, executor)
         .await
     }
 }
@@ -84,8 +85,9 @@ mod test {
             r#if: None,
             store: None,
         };
+        let context = RunContext::default();
 
-        let output = testing_block_on!(ex, command_config.evaluate(0, &vars, &ex))?;
+        let output = testing_block_on!(ex, command_config.evaluate(0, &vars, &context, &ex))?;
         match output {
             StepEvaluationResult::Completed(output) => {
                 match serde_json::from_str::<JsonValue>(&output) {

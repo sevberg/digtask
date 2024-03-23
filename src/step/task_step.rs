@@ -1,20 +1,23 @@
 use crate::{
+    config::{DirConfig, EnvConfig},
     executor::DigExecutor,
+    run_context::RunContext,
     token::TokenedJsonValue,
     vars::{RawVariableMap, StackMode, VariableSet},
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
+use async_process::Command;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, path::Path, process::Command};
+use std::collections::HashMap;
 
-use super::common::{StepEvaluationResult, StepMethods};
+use super::common::{contextualize_command, StepEvaluationResult, StepMethods};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct TaskStepConfig {
     pub task: String,
     pub vars: Option<RawVariableMap>,
-    pub env: Option<HashMap<String, String>>,
-    pub dir: Option<String>,
+    pub env: EnvConfig,
+    pub dir: DirConfig,
     pub r#if: Option<Vec<String>>,
     // pub store: Option<String>,
     pub over: Option<HashMap<String, String>>,
@@ -22,71 +25,12 @@ pub struct TaskStepConfig {
     // pub inherit_parent_vars: bool,
 }
 
-fn contextualize_command(
-    command: &mut Command,
-    env: Option<&HashMap<String, String>>,
-    dir: Option<&String>,
-) {
-    match env {
-        None => (),
-        Some(envmap) => {
-            command.envs(envmap);
-        }
-    }
-    match dir {
-        None => (),
-        Some(dir) => {
-            command.current_dir(dir);
-        }
-    }
-}
-
 impl TaskStepConfig {
-    fn build_envs(&self, vars: &VariableSet) -> Result<Option<HashMap<String, String>>> {
-        let output = match &self.env {
-            None => None,
-            Some(envmap) => {
-                let mut output_envmap: HashMap<String, String> = HashMap::new();
-                envmap
-                    .iter()
-                    .map(|(key, val)| {
-                        let key = key.evaluate_tokens_to_string("env-key", vars)?;
-                        let val = val.evaluate_tokens_to_string("env-value", vars)?;
-                        output_envmap.insert(key, val);
-                        Ok(())
-                    })
-                    .collect::<Result<Vec<()>>>()?;
-
-                Some(output_envmap)
-            }
-        };
-
-        Ok(output)
-    }
-
-    fn build_dir(&self, vars: &VariableSet) -> Result<Option<String>> {
-        let output = match &self.dir {
-            None => None,
-            Some(specified_dir) => {
-                let specified_dir = specified_dir.evaluate_tokens_to_string("dir", vars)?;
-                let path = Path::new(specified_dir.as_str());
-
-                if !path.is_dir() {
-                    return Err(anyhow!("Invalid directory '{}'", specified_dir));
-                }
-
-                Some(specified_dir)
-            }
-        };
-
-        Ok(output)
-    }
-
-    fn test_if_statement(
+    async fn test_if_statement(
         &self,
         vars: &VariableSet,
-        env: Option<&HashMap<String, String>>,
-        dir: Option<&String>,
+        context: &RunContext,
+        executor: &DigExecutor<'_>,
     ) -> Result<Option<(usize, String)>> {
         // Test If statements
         match &self.r#if {
@@ -100,9 +44,12 @@ impl TaskStepConfig {
                     command.arg("-c");
                     let _command = command.arg(format!("test {}", statement));
 
-                    contextualize_command(_command, env, dir);
+                    contextualize_command(_command, context);
 
-                    let command_output = command.output()?;
+                    let lock = executor.limiter.acquire().await;
+                    let command_output = command.output().await?;
+                    drop(lock);
+
                     let result = command_output.status;
                     if !result.success() {
                         output = Some((i + 1, statement));
@@ -122,8 +69,7 @@ impl TaskStepConfig {
         &self,
         step_i: usize,
         vars: &VariableSet,
-        env: Option<&HashMap<String, String>>,
-        dir: Option<&String>,
+        context: RunContext,
         map_vars: Option<&Vec<(String, String)>>,
     ) -> Result<Vec<PreparedTaskStep>> {
         let output = match map_vars {
@@ -132,8 +78,7 @@ impl TaskStepConfig {
                     // Note we clone everything so that each task manages it's own data
                     task: self.task.clone(),
                     vars: vars.clone(),
-                    env: env.cloned(),
-                    dir: dir.cloned(),
+                    context,
                     // over: self.over.clone(),
                 };
                 self.log(
@@ -150,7 +95,7 @@ impl TaskStepConfig {
             Some(map_vars) => {
                 let mut map_vars = map_vars.clone();
                 match map_vars.pop() {
-                    None => self._prepare_subtasks(step_i, vars, env, dir, None)?,
+                    None => self._prepare_subtasks(step_i, vars, context, None)?,
                     Some((target_key, source_key)) => {
                         let source_value_vec = match source_key.evaluate_tokens(vars)? {
                             serde_json::Value::Array(x) => x.clone(),
@@ -168,8 +113,7 @@ impl TaskStepConfig {
                             let new_tasks = self._prepare_subtasks(
                                 step_i,
                                 &new_step_vars,
-                                env,
-                                dir,
+                                context.clone(),
                                 Some(&map_vars),
                             )?;
                             output.extend(new_tasks);
@@ -187,17 +131,16 @@ impl TaskStepConfig {
         &self,
         step_i: usize,
         vars: &VariableSet,
-        env: Option<&HashMap<String, String>>,
-        dir: Option<&String>,
+        context: RunContext,
     ) -> Result<StepEvaluationResult> {
         let output = match &self.over {
             None => {
-                let tasks = self._prepare_subtasks(step_i, vars, env, dir, None)?;
+                let tasks = self._prepare_subtasks(step_i, vars, context, None)?;
                 StepEvaluationResult::SubmitTasks(tasks)
             }
             Some(map_over) => {
                 let map_vars = Vec::from_iter(map_over.clone().into_iter());
-                let tasks = self._prepare_subtasks(step_i, vars, env, dir, Some(&map_vars))?;
+                let tasks = self._prepare_subtasks(step_i, vars, context, Some(&map_vars))?;
                 StepEvaluationResult::SubmitTasks(tasks)
             }
         };
@@ -214,20 +157,21 @@ impl StepMethods for TaskStepConfig {
         &self,
         step_i: usize,
         vars: &VariableSet,
+        context: &RunContext,
         executor: &DigExecutor<'_>,
     ) -> Result<StepEvaluationResult> {
+        let mut context = context.clone();
         let vars = match &self.vars {
             None => vars.stack(StackMode::CopyLocals),
             Some(raw_vars) => {
-                vars.stack_raw_variables(&raw_vars, StackMode::EmptyLocals, executor)
+                vars.stack_raw_variables(&raw_vars, StackMode::EmptyLocals, &context, executor)
                     .await?
             }
         };
+        context.update_dir(&self.dir, &vars)?;
+        context.update_env(&self.env, &vars)?;
 
-        let env = self.build_envs(&vars)?;
-        let dir = self.build_dir(&vars)?;
-
-        let exit_on_if = self.test_if_statement(&vars, env.as_ref(), dir.as_ref())?;
+        let exit_on_if = self.test_if_statement(&vars, &context, executor).await?;
         let output = match exit_on_if {
             Some((if_stmt_id, if_stmt_str)) => {
                 self.log(
@@ -239,7 +183,7 @@ impl StepMethods for TaskStepConfig {
                 );
                 StepEvaluationResult::SkippedDueToIfStatement((if_stmt_id, if_stmt_str))
             }
-            None => self.prepare_subtasks(step_i, &vars, env.as_ref(), dir.as_ref())?,
+            None => self.prepare_subtasks(step_i, &vars, context)?,
         };
 
         Ok(output)
@@ -250,8 +194,7 @@ impl StepMethods for TaskStepConfig {
 pub struct PreparedTaskStep {
     pub task: String,
     pub vars: VariableSet,
-    pub env: Option<HashMap<String, String>>,
-    pub dir: Option<String>,
+    pub context: RunContext,
     // pub r#if: Option<Vec<String>>,
     // pub store: Option<String>,
     // pub over: Option<HashMap<String, String>>,
@@ -259,6 +202,7 @@ pub struct PreparedTaskStep {
 
 #[cfg(test)]
 mod tests {
+
     use serde_json::json;
 
     use crate::{testing_block_on, vars::VariableMap};
@@ -292,8 +236,9 @@ mod tests {
         };
 
         let vars = _make_vars();
+        let context = RunContext::default();
 
-        let output = testing_block_on!(ex, task_config.evaluate(0, &vars, &ex))?;
+        let output = testing_block_on!(ex, task_config.evaluate(0, &vars, &context, &ex))?;
 
         match output {
             StepEvaluationResult::SubmitTasks(mut tasks) => {
@@ -302,8 +247,8 @@ mod tests {
                 assert_eq!(task_def.task, "test_task");
                 assert_eq!(task_def.vars.parent().unwrap(), &vars.local_vars);
                 assert_eq!(task_def.vars.local_vars, vars.local_vars);
-                assert!(task_def.env.is_none());
-                assert!(task_def.dir.is_none());
+                assert!(task_def.context.env.is_none());
+                assert!(task_def.context.dir.is_none());
                 Ok(())
             }
             other => bail!("Expected to 'SubmitTasks', got '{:?}'", other),
@@ -328,7 +273,8 @@ mod tests {
         };
 
         let vars = _make_vars();
-        let output = testing_block_on!(ex, task_config.evaluate(0, &vars, &ex))?;
+        let context = RunContext::default();
+        let output = testing_block_on!(ex, task_config.evaluate(0, &vars, &context, &ex))?;
 
         match output {
             StepEvaluationResult::SubmitTasks(mut tasks) => {
@@ -337,8 +283,8 @@ mod tests {
                 assert_eq!(task_def.task, "test_task");
                 assert_eq!(task_def.vars.parent().unwrap(), &vars.local_vars);
                 assert_eq!(task_def.vars.local_vars, vars.local_vars);
-                assert_eq!(task_def.env, Some(env));
-                assert_eq!(task_def.dir, Some(dir));
+                assert_eq!(task_def.context.env, Some(env));
+                assert_eq!(task_def.context.dir, Some(dir));
                 Ok(())
             }
             other => bail!("Expected to 'SubmitTasks', got '{:?}'", other),
@@ -357,7 +303,8 @@ mod tests {
         };
 
         let vars = _make_vars();
-        let output = testing_block_on!(ex, task_config.evaluate(0, &vars, &ex))?;
+        let context = RunContext::default();
+        let output = testing_block_on!(ex, task_config.evaluate(0, &vars, &context, &ex))?;
 
         match output {
             StepEvaluationResult::SkippedDueToIfStatement((statement_num, reason)) => {
@@ -381,7 +328,8 @@ mod tests {
         };
 
         let vars = _make_vars();
-        let output = testing_block_on!(ex, task_config.evaluate(0, &vars, &ex))?;
+        let context = RunContext::default();
+        let output = testing_block_on!(ex, task_config.evaluate(0, &vars, &context, &ex))?;
 
         match output {
             StepEvaluationResult::SubmitTasks(mut tasks) => {
@@ -390,8 +338,8 @@ mod tests {
                 assert_eq!(task_def.task, "test_task");
                 assert_eq!(task_def.vars.parent().unwrap(), &vars.local_vars);
                 assert!(task_def.vars.local_vars.is_empty());
-                assert!(task_def.env.is_none());
-                assert!(task_def.dir.is_none());
+                assert!(task_def.context.env.is_none());
+                assert!(task_def.context.dir.is_none());
                 Ok(())
             }
             other => bail!("Expected to 'SubmitTasks', got '{:?}'", other),
@@ -414,7 +362,8 @@ mod tests {
         };
 
         let vars = _make_vars();
-        let output = testing_block_on!(ex, task_config.evaluate(0, &vars, &ex))?;
+        let context = RunContext::default();
+        let output = testing_block_on!(ex, task_config.evaluate(0, &vars, &context, &ex))?;
 
         match output {
             StepEvaluationResult::SubmitTasks(mut tasks) => {
@@ -423,8 +372,8 @@ mod tests {
                 // Queued Task 1
                 let task_def = tasks.pop().unwrap();
                 assert_eq!(task_def.task, "test_task");
-                assert!(task_def.env.is_none());
-                assert!(task_def.dir.is_none());
+                assert!(task_def.context.env.is_none());
+                assert!(task_def.context.dir.is_none());
                 assert_eq!(task_def.vars.parent().unwrap(), &vars.local_vars);
 
                 let expected_vars: VariableMap = vec![

@@ -1,4 +1,5 @@
 use crate::executor::DigExecutor;
+use crate::run_context::RunContext;
 use crate::step::common::{CommandConfig, StepEvaluationResult, StepMethods};
 use crate::token::TokenedJsonValue;
 use anyhow::{anyhow, bail, Result};
@@ -94,6 +95,7 @@ impl VariableSet {
         &self,
         raw_vars: &RawVariableMap,
         stack_mode: StackMode,
+        context: &RunContext,
         executor: &DigExecutor<'_>,
     ) -> Result<Self> {
         let mut output_vars = self.stack(stack_mode);
@@ -108,7 +110,7 @@ impl VariableSet {
                     None => {
                         let key =
                             keytoken.evaluate_tokens_to_string("variable key", &output_vars)?;
-                        let value = rawvalue.evaluate(&output_vars, executor).await?;
+                        let value = rawvalue.evaluate(&output_vars, context, executor).await?;
                         Some((key, value))
                     }
                 }
@@ -137,19 +139,22 @@ impl RawVariable {
     pub async fn evaluate(
         &self,
         vars: &VariableSet,
+        context: &RunContext,
         executor: &DigExecutor<'_>,
     ) -> Result<JsonValue> {
         let output = match &self {
             RawVariable::Json(json_value) => json_value.evaluate_tokens(vars)?,
-            RawVariable::Executable(command) => match command.evaluate(0, vars, executor).await? {
-                StepEvaluationResult::Completed(str_val) => {
-                    match serde_json::from_str::<JsonValue>(&str_val) {
-                        Ok(json_val) => json_val,
-                        Err(_) => JsonValue::String(str_val),
+            RawVariable::Executable(command) => {
+                match command.evaluate(0, vars, context, executor).await? {
+                    StepEvaluationResult::Completed(str_val) => {
+                        match serde_json::from_str::<JsonValue>(&str_val) {
+                            Ok(json_val) => json_val,
+                            Err(_) => JsonValue::String(str_val),
+                        }
                     }
+                    _ => bail!("Command did not result in an output"),
                 }
-                _ => bail!("Command did not result in an output"),
-            },
+            }
         };
 
         Ok(output)
@@ -208,7 +213,9 @@ mod test {
         // Stack raw variables
         let vars = VariableSet::new();
         let executor = DigExecutor::new(1);
-        let future = vars.stack_raw_variables(&raw_var_map, StackMode::EmptyLocals, &executor);
+        let context = RunContext::default();
+        let future =
+            vars.stack_raw_variables(&raw_var_map, StackMode::EmptyLocals, &context, &executor);
         let evaluated = smol::block_on(executor.executor.run(future))?;
 
         // Assert outputs
@@ -249,7 +256,9 @@ mod test {
         // Stack raw variables
         let vars = VariableSet::new();
         let executor = DigExecutor::new(1);
-        let future = vars.stack_raw_variables(&rawvars, StackMode::EmptyLocals, &executor);
+        let context = RunContext::default();
+        let future =
+            vars.stack_raw_variables(&rawvars, StackMode::EmptyLocals, &context, &executor);
         let evaluated = smol::block_on(executor.executor.run(future))?;
 
         // Assert outputs

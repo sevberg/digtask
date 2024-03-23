@@ -1,4 +1,4 @@
-use crate::{executor::DigExecutor, vars::VariableSet};
+use crate::{executor::DigExecutor, run_context::RunContext, vars::VariableSet};
 use anyhow::Result;
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
@@ -15,11 +15,12 @@ impl StepMethods for ParallelStepConfig {
         &self,
         step_i: usize,
         vars: &VariableSet,
+        context: &RunContext,
         executor: &DigExecutor<'_>,
     ) -> Result<StepEvaluationResult> {
         let mut tasks = Vec::new();
         for (_, step) in self.parallel.iter().enumerate() {
-            tasks.push(step.evaluate(step_i, vars, executor))
+            tasks.push(step.evaluate(step_i, vars, context, executor))
         }
         let task_outcomes = join_all(tasks).await;
 
@@ -66,7 +67,8 @@ mod tests {
             ],
         };
         let vars = VariableSet::new();
-        let output = testing_block_on!(ex, step_config.evaluate(0, &vars, &ex))?;
+        let context = RunContext::default();
+        let output = testing_block_on!(ex, step_config.evaluate(0, &vars, &context, &ex))?;
 
         match output {
             StepEvaluationResult::Completed(val) => {
@@ -88,7 +90,8 @@ mod tests {
             ],
         };
         let vars = VariableSet::new();
-        let output = testing_block_on!(ex, step_config.evaluate(0, &vars, &ex))?;
+        let context = RunContext::default();
+        let output = testing_block_on!(ex, step_config.evaluate(0, &vars, &context, &ex))?;
 
         match output {
             StepEvaluationResult::Completed(val) => {
@@ -109,7 +112,8 @@ mod tests {
             ],
         };
         let vars = VariableSet::new();
-        let output = testing_block_on!(ex, step_config.evaluate(0, &vars, &ex));
+        let context = RunContext::default();
+        let output = testing_block_on!(ex, step_config.evaluate(0, &vars, &context, &ex));
 
         match output {
             Ok(value) => bail!("Expected a failure, but instead got '{:?}'", value),

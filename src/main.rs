@@ -1,5 +1,6 @@
 mod config;
 mod executor;
+mod run_context;
 mod step;
 mod task;
 mod token;
@@ -11,6 +12,7 @@ mod test_utils;
 use anyhow::{anyhow, Result};
 use clap::Parser;
 use config::DigConfig;
+use run_context::RunContext;
 use serde_json::json;
 use vars::{StackMode, VariableSet};
 
@@ -47,20 +49,16 @@ async fn evaluate_main_task(
     executor: &DigExecutor<'_>,
 ) -> Result<()> {
     // handle global variables
+    let dummy_context = RunContext::default();
     let vars = match &config.vars {
         None => vars,
         Some(raw_vars) => {
-            vars.stack_raw_variables(raw_vars, StackMode::CopyLocals, executor)
+            vars.stack_raw_variables(raw_vars, StackMode::CopyLocals, &dummy_context, executor)
                 .await?
         }
     };
 
     // Begin execution
-    let mut main_task = config
-        .get_task(&user_args.task)?
-        .prepare("main", &vars, StackMode::EmptyLocals, executor)
-        .await?;
-
     let forcing = match user_args.force_all {
         true => ForcingContext::EverythingForced,
         false => match user_args.force_first {
@@ -68,9 +66,14 @@ async fn evaluate_main_task(
             false => ForcingContext::NotForced,
         },
     };
-    main_task
-        .evaluate(&config, false, executor, forcing)
+    let context = RunContext::new(&forcing, &config.env, &config.dir, &vars)?;
+
+    let mut main_task = config
+        .get_task(&user_args.task)?
+        .prepare("main", &vars, StackMode::EmptyLocals, context, executor)
         .await?;
+
+    main_task.evaluate(&config, false, executor).await?;
 
     Ok(())
 }

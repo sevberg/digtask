@@ -1,11 +1,17 @@
-use crate::{executor::DigExecutor, token::TokenedJsonValue, vars::VariableSet};
+use crate::{
+    config::{DirConfig, EnvConfig},
+    executor::DigExecutor,
+    run_context::RunContext,
+    token::TokenedJsonValue,
+    vars::VariableSet,
+};
 use anyhow::{anyhow, Result};
 use async_process::Command;
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::{borrow::BorrowMut, collections::HashMap, path::Path, process::ExitStatus};
 
-use super::common::{StepEvaluationResult, StepMethods};
+use super::common::{contextualize_command, StepEvaluationResult, StepMethods};
 
 fn default_command_entry() -> String {
     "bash -c".into()
@@ -27,38 +33,19 @@ pub enum CommandEntry {
     Many(Vec<String>),
 }
 
-fn contextualize_command(
-    command: &mut Command,
-    env: Option<&HashMap<String, String>>,
-    dir: Option<&String>,
-) {
-    match env {
-        None => (),
-        Some(envmap) => {
-            command.envs(envmap);
-        }
-    }
-    match dir {
-        None => (),
-        Some(dir) => {
-            command.current_dir(dir);
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct BasicStep {
     pub cmd: RawCommandEntry,
     #[serde(default = "default_command_entry")]
     pub entry: String,
-    pub env: Option<HashMap<String, String>>,
-    pub dir: Option<String>,
+    pub env: EnvConfig,
+    pub dir: DirConfig,
     pub r#if: Option<Vec<String>>,
     pub store: Option<String>,
 }
 
 impl BasicStep {
-    fn build_envs(&self, vars: &VariableSet) -> Result<Option<HashMap<String, String>>> {
+    fn build_envs(&self, vars: &VariableSet) -> Result<EnvConfig> {
         let output = match &self.env {
             None => None,
             Some(envmap) => {
@@ -80,7 +67,7 @@ impl BasicStep {
         Ok(output)
     }
 
-    fn build_dir(&self, vars: &VariableSet) -> Result<Option<String>> {
+    fn build_dir(&self, vars: &VariableSet) -> Result<DirConfig> {
         let output = match &self.dir {
             None => None,
             Some(specified_dir) => {
@@ -141,14 +128,13 @@ impl BasicStep {
     async fn test_if_statement(
         &self,
         statement: &String,
-        env: Option<&HashMap<String, String>>,
-        dir: Option<&String>,
+        context: &RunContext,
         executor: &DigExecutor<'_>,
     ) -> Result<ExitStatus> {
         let mut command = Command::new("bash");
         command.arg("-c");
         let _command = command.arg(format!("test {}", statement));
-        contextualize_command(_command, env, dir);
+        contextualize_command(_command, context);
 
         // println!("LOCKING - {:?}", executor.limiter);
         let lock = executor.limiter.acquire().await;
@@ -169,10 +155,12 @@ impl StepMethods for BasicStep {
         &self,
         step_i: usize,
         vars: &VariableSet,
+        context: &RunContext,
         executor: &DigExecutor<'_>,
     ) -> Result<StepEvaluationResult> {
-        let env = self.build_envs(vars)?;
-        let dir = self.build_dir(vars)?;
+        let mut context = context.clone();
+        context.update_dir(&self.dir, vars)?;
+        context.update_env(&self.env, vars)?;
 
         // Test If statements
         let exit_on_if = match &self.r#if {
@@ -182,7 +170,7 @@ impl StepMethods for BasicStep {
                 for (i, statement) in statements.iter().enumerate() {
                     let statement = statement.evaluate_tokens_to_string("if-test", vars)?;
                     let result = self
-                        .test_if_statement(&statement, env.as_ref(), dir.as_ref(), executor)
+                        .test_if_statement(&statement, &context, executor)
                         .await?;
                     if !result.success() {
                         output = Some((i + 1, statement));
@@ -206,7 +194,7 @@ impl StepMethods for BasicStep {
 
         // Execute Command
         let (mut command, string_rep) = self.build_command(vars)?;
-        contextualize_command(command.borrow_mut(), env.as_ref(), dir.as_ref());
+        contextualize_command(command.borrow_mut(), &context);
         println!("STEP:{} -- {}", step_i, string_rep);
 
         // println!("LOCKING - {:?}", executor.limiter);
@@ -263,7 +251,8 @@ mod test {
             store: None,
         };
         let vars = VariableSet::new();
-        let output = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &ex))?;
+        let context = RunContext::default();
+        let output = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &context, &ex))?;
         match output {
             StepEvaluationResult::Completed(_) => (), // All good!
             _ => bail!("The step did not complete"),
@@ -284,7 +273,8 @@ mod test {
         };
 
         let vars = VariableSet::new();
-        let output = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &ex));
+        let context = RunContext::default();
+        let output = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &context, &ex));
         match output {
             Ok(val) => bail!("We expected a failure, but got '{:?}'", val),
             Err(error) => assert_eq!(error.to_string(), "No such file or directory (os error 2)"),
@@ -305,7 +295,8 @@ mod test {
         };
 
         let vars = VariableSet::new();
-        let output_dir = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &ex))?;
+        let context = RunContext::default();
+        let output_dir = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &context, &ex))?;
         assert_eq!(output_dir, StepEvaluationResult::Completed("/".to_string()));
 
         Ok(())
@@ -330,7 +321,8 @@ mod test {
             store: None,
         };
 
-        let message = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &ex))?;
+        let context = RunContext::default();
+        let message = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &context, &ex))?;
         assert_eq!(
             message,
             StepEvaluationResult::Completed("IM_A_VARIABLE, but IM_A_dogs".into())
@@ -358,7 +350,8 @@ mod test {
             store: None,
         };
 
-        let outcome = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &ex))?;
+        let context = RunContext::default();
+        let outcome = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &context, &ex))?;
         match outcome {
             StepEvaluationResult::SkippedDueToIfStatement((i, statement)) => {
                 assert_eq!(i, 2);
@@ -382,7 +375,8 @@ mod test {
         };
 
         let vars = VariableSet::new();
-        let output = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &ex))?;
+        let context = RunContext::default();
+        let output = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &context, &ex))?;
 
         match output {
             StepEvaluationResult::Completed(output) => {
@@ -415,7 +409,8 @@ mod test {
             store: None,
         };
 
-        let output = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &ex))?;
+        let context = RunContext::default();
+        let output = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &context, &ex))?;
 
         match output {
             StepEvaluationResult::Completed(output) => {
