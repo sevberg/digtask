@@ -1,11 +1,27 @@
 use crate::{
     config::{DirConfig, EnvConfig},
-    task::ForcingContext,
     token::TokenedJsonValue,
     vars::VariableSet,
 };
 use anyhow::{anyhow, Result};
+use serde::Deserialize;
 use std::{collections::HashMap, path::Path};
+
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
+pub enum ForcingContext {
+    NotForced,
+    ParentIsForced,
+    ExplicitlyForced,
+    ForcedAsMainTask,
+    EverythingForced,
+}
+
+#[derive(Deserialize, Debug, Clone, Copy)]
+pub enum ForcingBehaviour {
+    Never,
+    Always,
+    Inherit,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunContext {
@@ -39,12 +55,25 @@ impl RunContext {
         Ok(context)
     }
 
-    pub fn child_context(&self) -> Self {
+    pub fn child_context(&self, child_behavior: ForcingBehaviour) -> Self {
         let forcing = match &self.forcing {
             ForcingContext::EverythingForced => ForcingContext::EverythingForced,
-            ForcingContext::ExplicitlyForced => ForcingContext::ParentIsForced,
-            ForcingContext::ParentIsForced => ForcingContext::NotForced,
-            ForcingContext::NotForced => ForcingContext::NotForced,
+            ForcingContext::ForcedAsMainTask => ForcingContext::ExplicitlyForced,
+            ForcingContext::ExplicitlyForced => match child_behavior {
+                ForcingBehaviour::Always => ForcingContext::ExplicitlyForced,
+                ForcingBehaviour::Inherit => ForcingContext::ExplicitlyForced,
+                ForcingBehaviour::Never => ForcingContext::NotForced,
+            },
+            ForcingContext::ParentIsForced => match child_behavior {
+                ForcingBehaviour::Always => ForcingContext::ExplicitlyForced,
+                ForcingBehaviour::Inherit => ForcingContext::ParentIsForced,
+                ForcingBehaviour::Never => ForcingContext::NotForced,
+            },
+            ForcingContext::NotForced => match child_behavior {
+                ForcingBehaviour::Always => ForcingContext::ExplicitlyForced,
+                ForcingBehaviour::Inherit => ForcingContext::NotForced,
+                ForcingBehaviour::Never => ForcingContext::NotForced,
+            },
         };
 
         RunContext {
@@ -52,6 +81,16 @@ impl RunContext {
             env: self.env.clone(),
             dir: self.dir.clone(),
             silent: self.silent.clone(),
+        }
+    }
+
+    pub fn is_forced(&self) -> bool {
+        match self.forcing {
+            ForcingContext::EverythingForced => true,
+            ForcingContext::ForcedAsMainTask => true,
+            ForcingContext::ExplicitlyForced => true,
+            ForcingContext::ParentIsForced => false,
+            ForcingContext::NotForced => false,
         }
     }
 

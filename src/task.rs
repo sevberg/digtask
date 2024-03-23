@@ -10,7 +10,7 @@ use crate::{
     common::default_false,
     config::{DigConfig, DirConfig, EnvConfig},
     executor::DigExecutor,
-    run_context::RunContext,
+    run_context::{ForcingBehaviour, RunContext},
     step::{
         common::{StepConfig, StepEvaluationResult, StepMethods},
         task_step::PreparedTaskStep,
@@ -21,20 +21,6 @@ use crate::{
 
 use colored::Colorize;
 
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
-pub enum ForcingContext {
-    NotForced,
-    ExplicitlyForced,
-    ParentIsForced,
-    EverythingForced,
-}
-
-#[derive(Deserialize, Debug, Clone, Copy)]
-pub enum ForcingBehaviour {
-    Never,
-    Always,
-    Inherit,
-}
 fn default_forcing() -> ForcingBehaviour {
     ForcingBehaviour::Inherit
 }
@@ -60,9 +46,10 @@ impl TaskConfig {
         default_label: &str,
         vars: &VariableSet,
         stack_mode: StackMode,
-        mut context: RunContext,
+        parent_context: &RunContext,
         executor: &DigExecutor<'_>,
     ) -> Result<PreparedTask> {
+        let mut context = parent_context.child_context(self.forcing);
         let vars = match &self.vars {
             None => vars.stack(stack_mode),
             Some(raw_vars) => {
@@ -98,7 +85,6 @@ impl TaskConfig {
             inputs: inputs,
             outputs: outputs,
             vars: vars,
-            forcing_behavior: self.forcing,
             context,
         };
         Ok(output)
@@ -112,7 +98,7 @@ pub struct PreparedTask {
     pub inputs: Vec<String>,
     pub outputs: Vec<String>,
     pub vars: VariableSet,
-    pub forcing_behavior: ForcingBehaviour,
+    // pub forcing_behavior: ForcingBehaviour,
     pub context: RunContext,
 }
 
@@ -239,23 +225,8 @@ impl PreparedTask {
         let latest_input = self.get_latest_input()?;
         let earliest_output = self.get_earliest_output()?;
 
-        // Handle Forcing
-        let is_forced = match self.context.forcing {
-            ForcingContext::EverythingForced => true,
-            ForcingContext::NotForced => match self.forcing_behavior {
-                ForcingBehaviour::Always => true,
-                _ => false,
-            },
-            ForcingContext::ExplicitlyForced => true,
-            ForcingContext::ParentIsForced => match self.forcing_behavior {
-                ForcingBehaviour::Always => true,
-                ForcingBehaviour::Inherit => true,
-                ForcingBehaviour::Never => false,
-            },
-        };
-
         // Handle Skipping
-        let skip_reason = match is_forced {
+        let skip_reason = match self.context.is_forced() {
             true => None,
             false => match earliest_output < latest_input {
                 true => Some("Outputs are up to date".to_string()),
@@ -282,14 +253,14 @@ impl PreparedTask {
         capture_output: bool,
         executor: &DigExecutor<'_>,
     ) -> Result<Option<Vec<String>>> {
-        let subtask_context = self.context.child_context();
         let subtask_config = config.get_task(&subtask.task)?;
+        // let subtask_context = self.context.child_context(subtask_config.forcing);
         let mut subtask = subtask_config
             .prepare(
                 &subtask.task,
                 &subtask.vars,
                 StackMode::EmptyLocals,
-                subtask_context,
+                &self.context,
                 executor,
             )
             .await?;
@@ -411,7 +382,7 @@ mod tests {
         let context = RunContext::default();
         let mut prepared_task = testing_block_on!(
             ex,
-            task.prepare("test", &vars, StackMode::EmptyLocals, context, &ex)
+            task.prepare("test", &vars, StackMode::EmptyLocals, &context, &ex)
         )?;
 
         let config = DigConfig::new();
@@ -433,7 +404,7 @@ mod tests {
         let context = RunContext::default();
         let mut prepared_task = testing_block_on!(
             ex,
-            task.prepare("test", &vars, StackMode::EmptyLocals, context, &ex)
+            task.prepare("test", &vars, StackMode::EmptyLocals, &context, &ex)
         )?;
 
         let config = DigConfig::new();
@@ -459,7 +430,7 @@ mod tests {
         let context = RunContext::default();
         let mut prepared_task = testing_block_on!(
             ex,
-            main_task.prepare("test", &vars, StackMode::EmptyLocals, context, &ex)
+            main_task.prepare("test", &vars, StackMode::EmptyLocals, &context, &ex)
         )?;
 
         let outputs = testing_block_on!(ex, prepared_task.evaluate(&config, true, &ex))?;
@@ -487,7 +458,7 @@ mod tests {
         let context = RunContext::default();
         let mut prepared_task = testing_block_on!(
             ex,
-            main_task.prepare("test", &vars, StackMode::EmptyLocals, context, &ex)
+            main_task.prepare("test", &vars, StackMode::EmptyLocals, &context, &ex)
         )?;
 
         let outputs = testing_block_on!(ex, prepared_task.evaluate(&config, true, &ex))?;
@@ -537,7 +508,7 @@ mod tests {
         let context = RunContext::default();
         let mut prepared_task = testing_block_on!(
             ex,
-            task.prepare("test", &vars, StackMode::EmptyLocals, context, &ex)
+            task.prepare("test", &vars, StackMode::EmptyLocals, &context, &ex)
         )?;
 
         let config = DigConfig::new();

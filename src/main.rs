@@ -17,7 +17,7 @@ use run_context::RunContext;
 use serde_json::json;
 use vars::{StackMode, VariableSet};
 
-use crate::{executor::DigExecutor, task::ForcingContext};
+use crate::{executor::DigExecutor, run_context::ForcingContext};
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -63,7 +63,7 @@ async fn evaluate_main_task(
     let forcing = match user_args.force_all {
         true => ForcingContext::EverythingForced,
         false => match user_args.force_first {
-            true => ForcingContext::ExplicitlyForced,
+            true => ForcingContext::ForcedAsMainTask,
             false => ForcingContext::NotForced,
         },
     };
@@ -71,7 +71,7 @@ async fn evaluate_main_task(
 
     let mut main_task = config
         .get_task(&user_args.task)?
-        .prepare("main", &vars, StackMode::EmptyLocals, context, executor)
+        .prepare("main", &vars, StackMode::EmptyLocals, &context, executor)
         .await?;
 
     main_task.evaluate(&config, false, executor).await?;
