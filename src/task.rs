@@ -57,7 +57,7 @@ impl TaskConfig {
                     .await?
             }
         };
-        context.update(&self.env, &self.dir, self.silent, &vars)?;
+        context.update(self.env.as_ref(), self.dir.as_ref(), self.silent, &vars)?;
 
         let label = match &self.label {
             Some(val) => val.evaluate_tokens_to_string("label", &vars)?,

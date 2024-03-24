@@ -123,7 +123,7 @@ impl StepMethods for BasicStep {
         executor: &DigExecutor<'_>,
     ) -> Result<StepEvaluationResult> {
         let mut context = context.clone();
-        context.update(&self.env, &self.dir, self.silent, &vars)?;
+        context.update(self.env.as_ref(), self.dir.as_ref(), self.silent, &vars)?;
 
         // Test If statements
         let exit_on_if = match &self.r#if {

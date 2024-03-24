@@ -10,7 +10,9 @@ use crate::{
 };
 
 pub type EnvConfig = Option<HashMap<String, String>>;
+pub type EnvConfigRef<'a> = Option<&'a HashMap<String, String>>;
 pub type DirConfig = Option<String>;
+pub type DirConfigRef<'a> = Option<&'a String>;
 
 fn default_version() -> String {
     "1".into()

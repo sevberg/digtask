@@ -168,7 +168,7 @@ impl StepMethods for TaskStepConfig {
                     .await?
             }
         };
-        context.update(&self.env, &self.dir, self.silent, &vars)?;
+        context.update(self.env.as_ref(), self.dir.as_ref(), self.silent, &vars)?;
 
         let exit_on_if = self.test_if_statement(&vars, &context, executor).await?;
         let output = match exit_on_if {

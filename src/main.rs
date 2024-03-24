@@ -67,7 +67,7 @@ async fn evaluate_main_task(
             false => ForcingContext::NotForced,
         },
     };
-    let context = RunContext::new(&forcing, &config.env, &config.dir, &vars)?;
+    let context = RunContext::new(&forcing, config.env.as_ref(), config.dir.as_ref(), &vars)?;
 
     let mut main_task = config
         .get_task(&user_args.task)?

@@ -1,5 +1,5 @@
 use crate::{
-    config::{DirConfig, EnvConfig},
+    config::{DirConfig, DirConfigRef, EnvConfig, EnvConfigRef},
     token::TokenedJsonValue,
     vars::VariableSet,
 };
@@ -44,8 +44,8 @@ impl RunContext {
 
     pub fn new(
         forcing: &ForcingContext,
-        env: &EnvConfig,
-        dir: &DirConfig,
+        env: EnvConfigRef,
+        dir: DirConfigRef,
         vars: &VariableSet,
     ) -> Result<Self> {
         let mut context = RunContext::default();
@@ -96,8 +96,8 @@ impl RunContext {
 
     pub fn update(
         &mut self,
-        env: &EnvConfig,
-        dir: &DirConfig,
+        env: EnvConfigRef,
+        dir: DirConfigRef,
         silent: bool,
         vars: &VariableSet,
     ) -> Result<()> {
@@ -108,7 +108,7 @@ impl RunContext {
         Ok(())
     }
 
-    fn update_env(&mut self, env: &EnvConfig, vars: &VariableSet) -> Result<()> {
+    fn update_env(&mut self, env: EnvConfigRef, vars: &VariableSet) -> Result<()> {
         let env = match env {
             None => None,
             Some(envmap) => {
@@ -140,7 +140,7 @@ impl RunContext {
         Ok(())
     }
 
-    fn update_dir(&mut self, dir: &DirConfig, vars: &VariableSet) -> Result<()> {
+    fn update_dir(&mut self, dir: DirConfigRef, vars: &VariableSet) -> Result<()> {
         match dir {
             None => (),
             Some(specified_dir) => {
