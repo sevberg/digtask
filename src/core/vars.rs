@@ -1,7 +1,10 @@
-use crate::executor::DigExecutor;
-use crate::run_context::RunContext;
-use crate::step::common::{CommandConfig, StepEvaluationResult, StepMethods};
-use crate::token::TokenedJsonValue;
+use crate::core::{
+    executor::DigExecutor,
+    run_context::RunContext,
+    step::common::{CommandConfig, StepEvaluationResult, StepMethods},
+    token::TokenedJsonValue,
+};
+
 use anyhow::{anyhow, bail, Result};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -172,7 +175,7 @@ pub type RawVariableMap = IndexMap<String, RawVariable>;
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::step::python_step::PythonStep;
+    use crate::core::step::python_step::PythonStep;
 
     use anyhow::anyhow;
     use serde_json::json;

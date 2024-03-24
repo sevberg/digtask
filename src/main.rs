@@ -1,23 +1,19 @@
-mod common;
-mod config;
-mod executor;
-mod run_context;
-mod step;
-mod task;
-mod token;
-mod vars;
+mod core;
 
 #[cfg(test)]
-mod test_utils;
+mod test;
 
 use anyhow::{anyhow, Result};
 use clap::Parser;
-use config::DigConfig;
-use run_context::RunContext;
 use serde_json::json;
-use vars::{StackMode, VariableSet};
 
-use crate::{executor::DigExecutor, run_context::ForcingContext};
+use crate::core::{
+    config::DigConfig,
+    executor::DigExecutor,
+    run_context::ForcingContext,
+    run_context::RunContext,
+    vars::{StackMode, VariableSet},
+};
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]

@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use serde::Deserialize;
 use serde_yaml;
 
-use crate::{
+use crate::core::{
     task::TaskConfig,
     vars::{RawVariable, RawVariableMap},
 };

@@ -5,7 +5,7 @@ use winnow::combinator::{alt, delimited};
 use winnow::token::{any, take_till, take_until, take_while};
 use winnow::{PResult, Parser};
 
-use crate::vars::VariableSet;
+use crate::core::vars::VariableSet;
 
 #[derive(Debug)]
 enum ParsedElement<'s> {
@@ -159,7 +159,7 @@ mod test {
     use rstest::*;
     use serde_json::json;
 
-    use crate::test_utils::*;
+    use crate::test::utils::*;
 
     #[test]
     fn test_multiline() -> Result<()> {

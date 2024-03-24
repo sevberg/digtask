@@ -1,7 +1,7 @@
 use serde_json::json;
 use std::collections::HashMap;
 
-use crate::vars::VariableSet;
+use crate::core::vars::VariableSet;
 
 pub fn variable_set_bob() -> VariableSet {
     let mut vars = VariableSet::new();

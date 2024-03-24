@@ -6,7 +6,7 @@ use futures::future::join_all;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 
-use crate::{
+use crate::core::{
     common::default_false,
     config::{DigConfig, DirConfig, EnvConfig},
     executor::DigExecutor,
@@ -283,11 +283,11 @@ mod tests {
     use anyhow::bail;
     use serde_json::json;
 
-    use crate::{
+    use crate::core::{
         step::{common::SingularStepConfig, task_step::TaskStepConfig},
-        testing_block_on,
         vars::RawVariable,
     };
+    use crate::testing_block_on;
 
     use super::*;
 
