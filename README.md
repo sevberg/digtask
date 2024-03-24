@@ -14,8 +14,9 @@
 * **on_error**: When a task fails, give the option of crashing (default), ignoring, or running anotehr task
 * **includes**: Allow config files to be composed of other config files (i.e. 'namespaces')
 * **dot_env**:  Allow importing environment variables from a file BEFORE the global 'vars' are evaluated
-* **--list**: CLI command to list available tasks
+* **dig out**: CLI command to run a task based on a specified output
+* **dig list**: CLI command to list available tasks
   * Add task config to allow hiding tasks
-* **--summary [TASK]**: A CLI command to print a description of a specified task
+* **dig summary [TASK]**: A CLI command to print a description of a specified task
 * **run_if and skip_if**: Change 'if' configs to 'run_if', and implement the inverse 'skip_if'
 * **prevent duplication**: Keep track of executed tasks, and prevent duplicate runs (unless specifically allowed)
