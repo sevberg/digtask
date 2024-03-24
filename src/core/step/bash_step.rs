@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::{
+use crate::core::{
     common::default_false, executor::DigExecutor, run_context::RunContext, vars::VariableSet,
 };
 

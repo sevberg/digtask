@@ -1,8 +1,9 @@
-use crate::{
+use crate::core::{
     common::default_false,
     config::{DirConfig, EnvConfig},
     executor::DigExecutor,
     run_context::RunContext,
+    step::common::{contextualize_command, StepEvaluationResult, StepMethods},
     token::TokenedJsonValue,
     vars::VariableSet,
 };
@@ -11,8 +12,6 @@ use async_process::Command;
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::{borrow::BorrowMut, process::ExitStatus};
-
-use super::common::{contextualize_command, StepEvaluationResult, StepMethods};
 
 fn default_command_entry() -> String {
     "bash -c".into()
@@ -203,7 +202,7 @@ mod test {
     use serde_json::Value as JsonValue;
 
     use super::*;
-    use crate::test_utils::*;
+    use crate::test::utils::*;
 
     #[test]
     fn test_whoami() -> Result<()> {

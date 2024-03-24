@@ -2,13 +2,15 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::{
-    common::default_false, executor::DigExecutor, run_context::RunContext, vars::VariableSet,
-};
-
-use super::{
-    basic_step::{BasicStep, RawCommandEntry},
-    common::{StepEvaluationResult, StepMethods},
+use crate::core::{
+    common::default_false,
+    executor::DigExecutor,
+    run_context::RunContext,
+    step::{
+        basic_step::{BasicStep, RawCommandEntry},
+        common::{StepEvaluationResult, StepMethods},
+    },
+    vars::VariableSet,
 };
 
 fn default_executable() -> String {

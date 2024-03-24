@@ -1,9 +1,12 @@
-use crate::{executor::DigExecutor, run_context::RunContext, vars::VariableSet};
+use crate::core::{
+    executor::DigExecutor,
+    run_context::RunContext,
+    step::common::{SingularStepConfig, StepEvaluationResult, StepMethods},
+    vars::VariableSet,
+};
 use anyhow::Result;
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
-
-use super::common::{SingularStepConfig, StepEvaluationResult, StepMethods};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ParallelStepConfig {

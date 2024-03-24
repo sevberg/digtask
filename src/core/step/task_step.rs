@@ -1,8 +1,9 @@
-use crate::{
+use crate::core::{
     common::default_false,
     config::{DirConfig, EnvConfig},
     executor::DigExecutor,
     run_context::RunContext,
+    step::common::{contextualize_command, StepEvaluationResult, StepMethods},
     token::TokenedJsonValue,
     vars::{RawVariableMap, StackMode, VariableSet},
 };
@@ -10,8 +11,6 @@ use anyhow::{bail, Result};
 use async_process::Command;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-
-use super::common::{contextualize_command, StepEvaluationResult, StepMethods};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct TaskStepConfig {
@@ -201,7 +200,7 @@ mod tests {
 
     use serde_json::json;
 
-    use crate::{testing_block_on, vars::VariableMap};
+    use crate::{core::vars::VariableMap, testing_block_on};
 
     use super::*;
 

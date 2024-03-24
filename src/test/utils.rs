@@ -27,4 +27,6 @@ macro_rules! testing_block_on {
         smol::block_on($executor.executor.run(future))
     }};
 }
+
+#[allow(unused_imports)]
 pub(crate) use testing_block_on;

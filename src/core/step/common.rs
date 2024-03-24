@@ -1,14 +1,18 @@
-use crate::executor::DigExecutor;
-use crate::run_context::RunContext;
-use crate::step::basic_step::BasicStep;
-use crate::step::{bash_step::BashStep, python_step::PythonStep};
-use crate::vars::VariableSet;
+use crate::core::{
+    executor::DigExecutor,
+    run_context::RunContext,
+    step::{
+        bash_step::BashStep,
+        basic_step::BasicStep,
+        parallel_step::ParallelStepConfig,
+        python_step::PythonStep,
+        task_step::{PreparedTaskStep, TaskStepConfig},
+    },
+    vars::VariableSet,
+};
 use anyhow::Result;
 use async_process::Command;
 use serde::{Deserialize, Serialize};
-
-use super::parallel_step::ParallelStepConfig;
-use super::task_step::{PreparedTaskStep, TaskStepConfig};
 
 pub fn contextualize_command(command: &mut Command, context: &RunContext) {
     match &context.env {
