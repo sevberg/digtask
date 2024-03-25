@@ -5,7 +5,7 @@ edition = "2021"
 description = "Dig is a YAML-defined, OS-level task orchestrator. It can 'dig into' a specifed task, or 'dig out' a desired output file"
 author = "(David) Severin Ryberg <s.ryberg@dras.tech>"
 license-file = "LICENSE.txt"
-keywords = ["task", "automation", "yaml", "orchestration", "runner", "utility"]
+keywords = ["task", "automation", "orchestration", "runner", "utility"]
 categories = ["asynchronous", "command-line-utilities", "concurrency", "development-tools::build-utils", "filesystem"]
 
 [[bin]]
