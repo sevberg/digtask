@@ -10,6 +10,7 @@ use crate::core::{
     common::default_false,
     config::{DigConfig, DirConfig, EnvConfig},
     executor::DigExecutor,
+    gate::RunGates,
     run_context::{ForcingBehaviour, RunContext},
     step::{
         common::{StepConfig, StepEvaluationResult, StepMethods},
@@ -21,8 +22,20 @@ use crate::core::{
 
 use colored::Colorize;
 
+use super::gate::test_run_gates;
+
 fn default_forcing() -> ForcingBehaviour {
     ForcingBehaviour::Inherit
+}
+
+fn task_log(label: &str, message: &str) {
+    let message = format!("TASK:{} -- {}", label, message).blue();
+    println!("{}", message)
+}
+
+fn task_log_bad(label: &str, message: &str) {
+    let message = format!("TASK:{} -- {}", label, message).red();
+    eprintln!("{}", message)
 }
 
 #[derive(Deserialize, Debug)]
@@ -31,6 +44,7 @@ pub struct TaskConfig {
     pub steps: Vec<StepConfig>, // Vec<TaskStep>,
     pub inputs: Option<Vec<String>>,
     pub outputs: Option<Vec<String>>,
+    pub run_if: Option<RunGates>,
     #[serde(default = "default_false")]
     pub silent: bool,
     pub vars: Option<RawVariableMap>,
@@ -64,79 +78,130 @@ impl TaskConfig {
             None => default_label.to_string(),
         };
 
-        let inputs = match &self.inputs {
-            Some(val) => val
-                .iter()
-                .map(|x| x.evaluate_tokens_to_string("input path", &vars))
-                .collect::<Result<Vec<_>, _>>()?,
-            None => Vec::new(),
-        };
-        let outputs = match &self.outputs {
-            Some(val) => val
-                .iter()
-                .map(|x| x.evaluate_tokens_to_string("output path", &vars))
-                .collect::<Result<Vec<_>, _>>()?,
-            None => Vec::new(),
-        };
+        // Handle skipping
+        let skip_reason = self.check_skip_state(&vars, &context, executor).await?;
+        match skip_reason {
+            None => (),
+            Some(reason) => match context.is_forced() {
+                false => return Ok(PreparedTask::SkippedTask(SkippedTask { label, reason })),
+                true => (),
+            },
+        }
 
-        let output = PreparedTask {
+        // Done
+        Ok(PreparedTask::RunnableTask(RunnableTask {
             label,
             steps: self.steps.clone(),
-            inputs,
-            outputs,
             vars,
             context,
-        };
-        Ok(output)
+        }))
     }
-}
 
-#[derive(Debug)]
-pub struct PreparedTask {
-    pub label: String,
-    pub steps: Vec<StepConfig>,
-    pub inputs: Vec<String>,
-    pub outputs: Vec<String>,
-    pub vars: VariableSet,
-    // pub forcing_behavior: ForcingBehaviour,
-    pub context: RunContext,
-}
+    async fn check_skip_state(
+        &self,
+        vars: &VariableSet,
+        context: &RunContext,
+        executor: &DigExecutor<'_>,
+    ) -> Result<Option<String>> {
+        // Test Run-If statemennts
+        let run_gate_outcome =
+            test_run_gates(self.run_if.as_ref(), vars, context, executor).await?;
+        if run_gate_outcome.is_some() {
+            let (id, run_if_exit) = run_gate_outcome.unwrap();
+            return Ok(Some(format!(
+                "run-if statement {} returned false: '{}'",
+                id, run_if_exit.statement
+            )));
+        }
 
-impl PreparedTask {
-    fn get_latest_input(&self) -> Result<SystemTime> {
+        // Test inputs/outputs
+        let latest_input = self.get_latest_input(vars)?;
+        let earliest_output = self.get_earliest_output(vars)?;
+        if earliest_output > latest_input {
+            return Ok(Some("all outputs are up to date'".to_string()));
+        }
+
+        // done
+        Ok(None)
+    }
+
+    fn get_latest_input(&self, vars: &VariableSet) -> Result<SystemTime> {
         let mut last_modification = SystemTime::UNIX_EPOCH;
-        for path in self.inputs.iter() {
-            let file_modified = match fs::metadata(path) {
-                Ok(meta) => meta.modified()?,
-                Err(error) => {
-                    self.log_bad(format!("Couldn't access input file '{}'", path).as_str());
-                    return Err(error.into());
+        match &self.inputs {
+            None => (),
+            Some(inputs) => {
+                for raw_path in inputs.iter() {
+                    let path = raw_path.evaluate_tokens_to_string("input path", vars)?;
+                    let file_modified = match fs::metadata(&path) {
+                        Ok(meta) => meta.modified()?,
+                        Err(error) => {
+                            // self.log_bad(format!("Couldn't access input file '{}'", path).as_str());
+                            return Err(error.into());
+                        }
+                    };
+                    last_modification = last_modification.max(file_modified);
                 }
-            };
-            last_modification = last_modification.max(file_modified);
+            }
         }
 
         Ok(last_modification)
     }
 
-    fn get_earliest_output(&self) -> Result<SystemTime> {
+    fn get_earliest_output(&self, vars: &VariableSet) -> Result<SystemTime> {
         let mut first_modification = SystemTime::now();
-        for path in self.outputs.iter() {
-            if Path::new(path).exists() {
-                let file_modified = fs::metadata(path)?.modified()?;
-                first_modification = first_modification.min(file_modified);
+        match &self.outputs {
+            None => (),
+            Some(outputs) => {
+                for raw_path in outputs.iter() {
+                    let path = raw_path.evaluate_tokens_to_string("output path", vars)?;
+                    if Path::new(&path).exists() {
+                        let file_modified = fs::metadata(&path)?.modified()?;
+                        first_modification = first_modification.min(file_modified);
+                    }
+                }
             }
         }
 
         Ok(first_modification)
     }
+}
 
-    async fn do_evaluation(
+#[derive(Debug)]
+pub struct SkippedTask {
+    pub label: String,
+    pub reason: String,
+}
+
+impl SkippedTask {
+    fn evaluate(&self) -> Result<Option<Vec<String>>> {
+        task_log(
+            &self.label,
+            format!("skipped due to {}", self.reason).as_str(),
+        );
+        Ok(None)
+    }
+}
+
+#[derive(Debug)]
+pub struct RunnableTask {
+    pub label: String,
+    pub steps: Vec<StepConfig>,
+    // pub inputs: Vec<String>,
+    // pub outputs: Vec<String>,
+    pub vars: VariableSet,
+    // pub forcing_behavior: ForcingBehaviour,
+    pub context: RunContext,
+}
+
+impl RunnableTask {
+    // #[async_recursion(?Send)]
+    pub async fn evaluate(
         &mut self,
         config: &DigConfig,
         capture_output: bool,
         executor: &DigExecutor<'_>,
     ) -> Result<Option<Vec<String>>> {
+        task_log(&self.label, "Begin");
         let mut outputs = Vec::new();
 
         for (step_i, step) in self.steps.iter().enumerate() {
@@ -204,46 +269,12 @@ impl PreparedTask {
             }
         }
 
-        self.log("Finished");
+        task_log(&self.label, "Finished");
 
         match capture_output {
             true => Ok(Some(outputs)),
             false => Ok(None),
         }
-    }
-
-    #[async_recursion(?Send)]
-    pub async fn evaluate(
-        &mut self,
-        config: &DigConfig,
-        capture_output: bool,
-        executor: &DigExecutor<'_>,
-    ) -> Result<Option<Vec<String>>> {
-        self.log("Begin");
-
-        // Handle Inputs/Outputs
-        let latest_input = self.get_latest_input()?;
-        let earliest_output = self.get_earliest_output()?;
-
-        // Handle Skipping
-        let skip_reason = match self.context.is_forced() {
-            true => None,
-            false => match earliest_output < latest_input {
-                true => Some("Outputs are up to date".to_string()),
-                false => None,
-            },
-        };
-
-        // Evaluate, if not skipped
-        let output = match skip_reason {
-            Some(reason) => {
-                self.log(format!("Skipping because {}", reason).as_str());
-                Ok(None)
-            }
-            None => self.do_evaluation(config, capture_output, executor).await,
-        };
-
-        output
     }
 
     async fn make_subtask_future(
@@ -267,14 +298,26 @@ impl PreparedTask {
 
         subtask.evaluate(config, capture_output, executor).await
     }
+}
 
-    fn log(&self, message: &str) {
-        let message = format!("TASK:{} -- {}", self.label, message).blue();
-        println!("{}", message)
-    }
-    fn log_bad(&self, message: &str) {
-        let message = format!("TASK:{} -- {}", self.label, message).red();
-        eprintln!("{}", message)
+pub enum PreparedTask {
+    RunnableTask(RunnableTask),
+    SkippedTask(SkippedTask),
+}
+
+impl PreparedTask {
+    #[async_recursion(?Send)]
+    pub async fn evaluate(
+        &mut self,
+        config: &DigConfig,
+        capture_output: bool,
+        executor: &DigExecutor<'_>,
+    ) -> Result<Option<Vec<String>>> {
+        let out = match self {
+            PreparedTask::RunnableTask(t) => t.evaluate(config, capture_output, executor).await?,
+            PreparedTask::SkippedTask(t) => t.evaluate()?,
+        };
+        Ok(out)
     }
 }
 
@@ -304,6 +347,7 @@ mod tests {
             steps: vec!["echo PREPARING: {{iso3}}".into()],
             inputs: None,
             outputs: None,
+            run_if: None,
             silent: false,
             vars: Some(
                 vec![("iso3".to_string(), RawVariable::Json("DEU".into()))]
@@ -335,6 +379,7 @@ mod tests {
             ],
             inputs: None,
             outputs: None,
+            run_if: None,
             silent: true,
             vars: Some(
                 vec![("iso3".to_string(), RawVariable::Json("GBR".into()))]
@@ -367,6 +412,7 @@ mod tests {
             ))],
             inputs: None,
             outputs: None,
+            run_if: None,
             silent: true,
             vars: None,
             forcing: ForcingBehaviour::Inherit,
@@ -490,6 +536,7 @@ mod tests {
             steps: vec!["echo \"I am the ${SOME_ENV}\"".into(), "pwd".into()],
             inputs: None,
             outputs: None,
+            run_if: None,
             silent: true,
             vars: Some(
                 vec![("iso3".to_string(), RawVariable::Json("DEU".into()))]

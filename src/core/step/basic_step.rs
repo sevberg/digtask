@@ -88,26 +88,6 @@ impl BasicStep {
         let string_rep = string_rep.join(" ");
         Ok((command, string_rep))
     }
-
-    // async fn test_if_statement(
-    //     &self,
-    //     statement: &String,
-    //     context: &RunContext,
-    //     executor: &DigExecutor<'_>,
-    // ) -> Result<ExitStatus> {
-    //     let mut command = Command::new("bash");
-    //     command.arg("-c");
-    //     let _command = command.arg(format!("test {}", statement));
-    //     contextualize_command(_command, context);
-
-    //     // println!("LOCKING - {:?}", executor.limiter);
-    //     let lock = executor.limiter.acquire().await;
-    //     let output = command.output().await?;
-    //     drop(lock);
-    //     // println!("UNLOCKING");
-
-    //     Ok(output.status)
-    // }
 }
 
 impl StepMethods for BasicStep {
