@@ -2,13 +2,13 @@ use crate::core::{
     common::default_false,
     config::{DirConfig, EnvConfig},
     executor::DigExecutor,
+    gate::test_run_gates,
     run_context::RunContext,
-    step::common::{contextualize_command, StepEvaluationResult, StepMethods},
+    step::common::{StepEvaluationResult, StepMethods},
     token::TokenedJsonValue,
     vars::{RawVariableMap, StackMode, VariableSet},
 };
 use anyhow::{bail, Result};
-use async_process::Command;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -18,47 +18,47 @@ pub struct TaskStepConfig {
     pub vars: Option<RawVariableMap>,
     pub env: EnvConfig,
     pub dir: DirConfig,
-    pub r#if: Option<Vec<String>>,
+    pub run_if: Option<Vec<String>>,
     pub over: Option<HashMap<String, String>>,
     #[serde(default = "default_false")]
     pub silent: bool,
 }
 
 impl TaskStepConfig {
-    async fn test_if_statement(
-        &self,
-        vars: &VariableSet,
-        context: &RunContext,
-        executor: &DigExecutor<'_>,
-    ) -> Result<Option<(usize, String)>> {
-        // Test If statements
-        match &self.r#if {
-            None => Ok(None),
-            Some(statements) => {
-                let mut output = None;
-                for (i, statement) in statements.iter().enumerate() {
-                    let statement = statement.evaluate_tokens_to_string("if-test", vars)?;
+    // async fn test_if_statement(
+    //     &self,
+    //     vars: &VariableSet,
+    //     context: &RunContext,
+    //     executor: &DigExecutor<'_>,
+    // ) -> Result<Option<(usize, String)>> {
+    //     // Test If statements
+    //     match &self.run_if {
+    //         None => Ok(None),
+    //         Some(statements) => {
+    //             let mut output = None;
+    //             for (i, statement) in statements.iter().enumerate() {
+    //                 let statement = statement.evaluate_tokens_to_string("if-test", vars)?;
 
-                    let mut command = Command::new("bash");
-                    command.arg("-c");
-                    let _command = command.arg(format!("test {}", statement));
+    //                 let mut command = Command::new("bash");
+    //                 command.arg("-c");
+    //                 let _command = command.arg(format!("test {}", statement));
 
-                    contextualize_command(_command, context);
+    //                 contextualize_command(_command, context);
 
-                    let lock = executor.limiter.acquire().await;
-                    let command_output = command.output().await?;
-                    drop(lock);
+    //                 let lock = executor.limiter.acquire().await;
+    //                 let command_output = command.output().await?;
+    //                 drop(lock);
 
-                    let result = command_output.status;
-                    if !result.success() {
-                        output = Some((i + 1, statement));
-                        break;
-                    }
-                }
-                Ok(output)
-            }
-        }
-    }
+    //                 let result = command_output.status;
+    //                 if !result.success() {
+    //                     output = Some((i + 1, statement));
+    //                     break;
+    //                 }
+    //             }
+    //             Ok(output)
+    //         }
+    //     }
+    // }
 
     fn log(&self, step_i: usize, message: String) {
         println!("STEP:{} -- {}", step_i, message)
@@ -171,17 +171,14 @@ impl StepMethods for TaskStepConfig {
         };
         context.update(self.env.as_ref(), self.dir.as_ref(), self.silent, &vars)?;
 
-        let exit_on_if = self.test_if_statement(&vars, &context, executor).await?;
-        let output = match exit_on_if {
-            Some((if_stmt_id, if_stmt_str)) => {
+        let runif_result = test_run_gates(self.run_if.as_ref(), &vars, &context, executor).await?;
+        let output = match runif_result {
+            Some((id, exit)) => {
                 self.log(
                     step_i,
-                    format!(
-                        "Skipped due to if statement #{}, '{}'",
-                        if_stmt_id, if_stmt_str
-                    ),
+                    format!("Skipped due to if statement #{}, '{}'", id, exit.statement),
                 );
-                StepEvaluationResult::SkippedDueToIfStatement((if_stmt_id, if_stmt_str))
+                StepEvaluationResult::SkippedDueToIfStatement((id, exit.statement))
             }
             None => self.prepare_subtasks(step_i, &vars, context)?,
         };
@@ -228,7 +225,7 @@ mod tests {
             vars: None,
             env: None,
             dir: None,
-            r#if: None,
+            run_if: None,
             over: None,
             silent: false,
         };
@@ -266,7 +263,7 @@ mod tests {
             vars: None,
             env: Some(env.clone()),
             dir: Some(dir.clone()),
-            r#if: None,
+            run_if: None,
             over: None,
             silent: false,
         };
@@ -297,7 +294,7 @@ mod tests {
             vars: None,
             env: None,
             dir: None,
-            r#if: Some(vec!["\"cats\" = \"dogs\"".into()]),
+            run_if: Some(vec!["\"cats\" = \"dogs\"".into()]),
             over: None,
             silent: false,
         };
@@ -308,7 +305,7 @@ mod tests {
 
         match output {
             StepEvaluationResult::SkippedDueToIfStatement((statement_num, reason)) => {
-                assert_eq!(statement_num, 1);
+                assert_eq!(statement_num, 0);
                 assert_eq!(reason, "\"cats\" = \"dogs\"");
                 Ok(())
             }
@@ -323,7 +320,7 @@ mod tests {
             vars: Some(RawVariableMap::new()),
             env: None,
             dir: None,
-            r#if: None,
+            run_if: None,
             over: None,
             silent: false,
         };
@@ -354,7 +351,7 @@ mod tests {
             vars: Some(_make_raw_vars()),
             env: None,
             dir: None,
-            r#if: None,
+            run_if: None,
             over: Some(
                 vec![("key3".to_string(), "{{key1}}".to_string())]
                     .into_iter()

@@ -1,9 +1,10 @@
 use crate::core::{
-    common::default_false,
+    common::{contextualize_command, default_false},
     config::{DirConfig, EnvConfig},
     executor::DigExecutor,
+    gate::{test_run_gates, RunGates},
     run_context::RunContext,
-    step::common::{contextualize_command, StepEvaluationResult, StepMethods},
+    step::common::{StepEvaluationResult, StepMethods},
     token::TokenedJsonValue,
     vars::VariableSet,
 };
@@ -11,7 +12,7 @@ use anyhow::{anyhow, Result};
 use async_process::Command;
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
-use std::{borrow::BorrowMut, process::ExitStatus};
+use std::borrow::BorrowMut;
 
 fn default_command_entry() -> String {
     "bash -c".into()
@@ -40,7 +41,7 @@ pub struct BasicStep {
     pub entry: String,
     pub env: EnvConfig,
     pub dir: DirConfig,
-    pub r#if: Option<Vec<String>>,
+    pub run_if: Option<RunGates>,
     pub store: Option<String>,
     #[serde(default = "default_false")]
     pub silent: bool,
@@ -88,25 +89,25 @@ impl BasicStep {
         Ok((command, string_rep))
     }
 
-    async fn test_if_statement(
-        &self,
-        statement: &String,
-        context: &RunContext,
-        executor: &DigExecutor<'_>,
-    ) -> Result<ExitStatus> {
-        let mut command = Command::new("bash");
-        command.arg("-c");
-        let _command = command.arg(format!("test {}", statement));
-        contextualize_command(_command, context);
+    // async fn test_if_statement(
+    //     &self,
+    //     statement: &String,
+    //     context: &RunContext,
+    //     executor: &DigExecutor<'_>,
+    // ) -> Result<ExitStatus> {
+    //     let mut command = Command::new("bash");
+    //     command.arg("-c");
+    //     let _command = command.arg(format!("test {}", statement));
+    //     contextualize_command(_command, context);
 
-        // println!("LOCKING - {:?}", executor.limiter);
-        let lock = executor.limiter.acquire().await;
-        let output = command.output().await?;
-        drop(lock);
-        // println!("UNLOCKING");
+    //     // println!("LOCKING - {:?}", executor.limiter);
+    //     let lock = executor.limiter.acquire().await;
+    //     let output = command.output().await?;
+    //     drop(lock);
+    //     // println!("UNLOCKING");
 
-        Ok(output.status)
-    }
+    //     Ok(output.status)
+    // }
 }
 
 impl StepMethods for BasicStep {
@@ -124,33 +125,17 @@ impl StepMethods for BasicStep {
         let mut context = context.clone();
         context.update(self.env.as_ref(), self.dir.as_ref(), self.silent, vars)?;
 
-        // Test If statements
-        let exit_on_if = match &self.r#if {
-            None => None,
-            Some(statements) => {
-                let mut output = None;
-                for (i, statement) in statements.iter().enumerate() {
-                    let statement = statement.evaluate_tokens_to_string("if-test", vars)?;
-                    let result = self
-                        .test_if_statement(&statement, &context, executor)
-                        .await?;
-                    if !result.success() {
-                        output = Some((i + 1, statement));
-                        break;
-                    }
-                }
-                output
-            }
-        };
+        // Test Run-If statements
+        let exit_on_if = test_run_gates(self.run_if.as_ref(), vars, &context, executor).await?;
         if exit_on_if.is_some() {
-            let (if_stmt_id, if_stmt_str) = exit_on_if.unwrap();
+            let (stmt_id, exit) = exit_on_if.unwrap();
             println!(
                 "STEP:{} -- Skipped due to if statement #{}, '{}'",
-                step_i, if_stmt_id, if_stmt_str
+                step_i, stmt_id, exit.statement
             );
             return Ok(StepEvaluationResult::SkippedDueToIfStatement((
-                if_stmt_id,
-                if_stmt_str,
+                stmt_id,
+                exit.statement,
             )));
         }
 
@@ -211,7 +196,7 @@ mod test {
             entry: "whoami".into(),
             env: None,
             dir: None,
-            r#if: None,
+            run_if: None,
             store: None,
             silent: false,
         };
@@ -233,7 +218,7 @@ mod test {
             entry: "whoamiwhoamiwhoami".into(),
             env: None,
             dir: None,
-            r#if: None,
+            run_if: None,
             store: None,
             silent: false,
         };
@@ -256,7 +241,7 @@ mod test {
             cmd: RawCommandEntry::Single("pwd".into()),
             dir: Some("/".into()),
             env: None,
-            r#if: None,
+            run_if: None,
             store: None,
             silent: false,
         };
@@ -284,7 +269,7 @@ mod test {
             cmd: RawCommandEntry::Single("echo \"${IM_AN_ENV}, but ${IM_A_{{KEY_1}}}\"".into()),
             dir: None,
             env: Some(envmap),
-            r#if: None,
+            run_if: None,
             store: None,
             silent: false,
         };
@@ -313,7 +298,7 @@ mod test {
             cmd: RawCommandEntry::Single("badcommand".into()),
             dir: None,
             env: None,
-            r#if: Some(if_statements),
+            run_if: Some(if_statements),
             store: None,
             silent: false,
         };
@@ -322,7 +307,7 @@ mod test {
         let outcome = testing_block_on!(ex, cmdconfig.evaluate(0, &vars, &context, &ex))?;
         match outcome {
             StepEvaluationResult::SkippedDueToIfStatement((i, statement)) => {
-                assert_eq!(i, 2);
+                assert_eq!(i, 1);
                 assert_eq!(statement, "dogs = monkeys".to_string());
             }
             _ => bail!("Did not skip as expected"),
@@ -338,7 +323,7 @@ mod test {
             cmd: RawCommandEntry::Many(vec!["-c".into(), "date +%s".into()]),
             env: None,
             dir: None,
-            r#if: None,
+            run_if: None,
             store: None,
             silent: false,
         };
@@ -374,7 +359,7 @@ mod test {
             cmd: RawCommandEntry::Many(vec!["-c".into(), "{{hats}} +%s".into()]),
             env: None,
             dir: None,
-            r#if: None,
+            run_if: None,
             store: None,
             silent: false,
         };

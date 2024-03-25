@@ -1,6 +1,7 @@
 pub mod common;
 pub mod config;
 pub mod executor;
+pub mod gate;
 pub mod run_context;
 pub mod step;
 pub mod task;

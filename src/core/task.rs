@@ -325,7 +325,7 @@ mod tests {
                     vars: None,
                     env: None,
                     dir: None,
-                    r#if: None,
+                    run_if: None,
                     over: None,
                     silent: false,
                 })),
@@ -356,7 +356,7 @@ mod tests {
                     vars: None,
                     env: None,
                     dir: None,
-                    r#if: None,
+                    run_if: None,
                     over: Some(
                         vec![("iso3".to_string(), "{{COUNTRIES}}".to_string())]
                             .into_iter()

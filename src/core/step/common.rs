@@ -11,23 +11,7 @@ use crate::core::{
     vars::VariableSet,
 };
 use anyhow::Result;
-use async_process::Command;
 use serde::{Deserialize, Serialize};
-
-pub fn contextualize_command(command: &mut Command, context: &RunContext) {
-    match &context.env {
-        None => (),
-        Some(envmap) => {
-            command.envs(envmap);
-        }
-    }
-    match &context.dir {
-        None => (),
-        Some(dir) => {
-            command.current_dir(dir);
-        }
-    }
-}
 
 #[derive(PartialEq, Debug)]
 pub enum StepEvaluationResult {
