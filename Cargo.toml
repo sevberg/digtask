@@ -1,9 +1,16 @@
 [package]
-name = "dig"
+name = "digtask"
 version = "0.1.0"
 edition = "2021"
+description = "Dig is a YAML-defined, OS-level task orchestrator. It can 'dig into' a specifed task, or 'dig out' a desired output file"
+author = "(David) Severin Ryberg <s.ryberg@dras.tech>"
+license-file = "LICENSE.txt"
+keywords = ["task", "automation", "yaml", "orchestration", "runner", "utility"]
+categories = ["asynchronous", "command-line-utilities", "concurrency", "development-tools::build-utils", "filesystem"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bin]]
+name = "dig"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.81"
