@@ -14,8 +14,7 @@ enum ParsedElement<'s> {
 }
 
 fn is_control_char(c: char) -> bool {
-    let output = c == '{' || c == '/';
-    output
+    c == '{' || c == '/'
 }
 
 fn parse_token<'s>(input: &mut &'s str) -> PResult<ParsedElement<'s>> {
@@ -42,10 +41,9 @@ fn parse_literal<'s>(input: &mut &'s str) -> PResult<ParsedElement<'s>> {
 }
 
 fn parse_element<'s>(input: &mut &'s str) -> PResult<ParsedElement<'s>> {
-    let output = alt((parse_token, parse_comment, parse_literal)).parse_next(input);
-    output
+    alt((parse_token, parse_comment, parse_literal)).parse_next(input)
 }
-fn parse_all_elements<'s>(input: &'s str) -> PResult<Vec<ParsedElement<'s>>> {
+fn parse_all_elements(input: &'_ str) -> PResult<Vec<ParsedElement<'_>>> {
     let mut input = input;
     let mut output = Vec::new();
     while !input.is_empty() {
@@ -111,12 +109,12 @@ pub trait TokenedJsonValue {
 
 impl TokenedJsonValue for String {
     fn evaluate_tokens(&self, vars: &VariableSet) -> Result<JsonValue> {
-        return evaluate_tokens(self, vars);
+        evaluate_tokens(self, vars)
     }
 }
 impl TokenedJsonValue for &str {
     fn evaluate_tokens(&self, vars: &VariableSet) -> Result<JsonValue> {
-        return evaluate_tokens(self, vars);
+        evaluate_tokens(self, vars)
     }
 }
 impl TokenedJsonValue for JsonValue {

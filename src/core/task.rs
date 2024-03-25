@@ -80,11 +80,11 @@ impl TaskConfig {
         };
 
         let output = PreparedTask {
-            label: label,
+            label,
             steps: self.steps.clone(),
-            inputs: inputs,
-            outputs: outputs,
-            vars: vars,
+            inputs,
+            outputs,
+            vars,
             context,
         };
         Ok(output)
@@ -141,7 +141,7 @@ impl PreparedTask {
 
         for (step_i, step) in self.steps.iter().enumerate() {
             let step_output = step
-                .evaluate(step_i, &self.vars, &self.context, &executor)
+                .evaluate(step_i, &self.vars, &self.context, executor)
                 .await?;
 
             let subtasks = match step_output {
@@ -186,10 +186,11 @@ impl PreparedTask {
                     let mut output = Vec::new();
                     for outcome in subtask_results {
                         match outcome {
-                            Ok(possible_subtask_output) => match possible_subtask_output {
-                                Some(subtask_output) => output.extend(subtask_output),
-                                None => (),
-                            },
+                            Ok(possible_subtask_output) => {
+                                if let Some(subtask_output) = possible_subtask_output {
+                                    output.extend(subtask_output)
+                                }
+                            }
                             Err(error) => return Err(error),
                         }
                     }
@@ -198,9 +199,8 @@ impl PreparedTask {
                 }
             };
 
-            match all_subtask_outputs {
-                Some(all_subtask_outputs) => outputs.extend(all_subtask_outputs),
-                None => (),
+            if let Some(all_subtask_outputs) = all_subtask_outputs {
+                outputs.extend(all_subtask_outputs)
             }
         }
 

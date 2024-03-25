@@ -29,10 +29,10 @@ pub struct BashStep {
 }
 
 impl BashStep {
-    pub fn new(command: &String) -> Self {
+    pub fn new(command: &str) -> Self {
         BashStep {
             executable: default_executable(),
-            bash: command.clone(),
+            bash: command.to_string(),
             env: None,
             dir: None,
             r#if: None,
@@ -56,13 +56,13 @@ impl StepMethods for BashStep {
     ) -> Result<StepEvaluationResult> {
         // let executable = self.executable.evaluate(vars)?;
         BasicStep {
-            entry: format!("{} -c", self.executable).into(),
+            entry: format!("{} -c", self.executable),
             cmd: RawCommandEntry::Single(self.bash.clone()),
             env: self.env.clone(),
             dir: self.dir.clone(),
             r#if: self.r#if.clone(),
             store: self.store.clone(),
-            silent: self.silent.clone(),
+            silent: self.silent,
         }
         .evaluate(step_i, vars, context, executor)
         .await

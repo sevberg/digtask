@@ -22,7 +22,7 @@ impl StepMethods for ParallelStepConfig {
         executor: &DigExecutor<'_>,
     ) -> Result<StepEvaluationResult> {
         let mut tasks = Vec::new();
-        for (_, step) in self.parallel.iter().enumerate() {
+        for step in self.parallel.iter() {
             tasks.push(step.evaluate(step_i, vars, context, executor))
         }
         let task_outcomes = join_all(tasks).await;
@@ -37,9 +37,8 @@ impl StepMethods for ParallelStepConfig {
                 Err(error) => return Err(error),
             };
 
-            match outcome {
-                Some(tasks) => output.extend(tasks),
-                None => {}
+            if let Some(tasks) = outcome {
+                output.extend(tasks)
             }
         }
 

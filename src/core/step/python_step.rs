@@ -58,13 +58,13 @@ impl StepMethods for PythonStep {
     ) -> Result<StepEvaluationResult> {
         // let executable = self.executable.evaluate(vars)?;
         BasicStep {
-            entry: format!("{} -c", self.executable).into(),
+            entry: format!("{} -c", self.executable),
             cmd: RawCommandEntry::Single(self.py.clone()),
             env: self.env.clone(),
             dir: self.dir.clone(),
             r#if: self.r#if.clone(),
             store: self.store.clone(),
-            silent: self.silent.clone(),
+            silent: self.silent,
         }
         .evaluate(step_i, vars, context, executor)
         .await

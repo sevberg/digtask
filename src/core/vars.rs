@@ -41,11 +41,8 @@ impl VariableSet {
             Some(value) => return Ok(value),
         }
         for vars in self.stacked_vars.iter().rev() {
-            match vars.get(key) {
-                Some(value) => {
-                    return Ok(value);
-                }
-                None => (),
+            if let Some(value) = vars.get(key) {
+                return Ok(value);
             }
         }
         Err(anyhow!("Failed to get key '{}'", key))
@@ -53,9 +50,7 @@ impl VariableSet {
 
     pub fn get_from_locals(&self, key: &str) -> Option<&JsonValue> {
         match self.local_vars.get(key) {
-            Some(value) => {
-                return Some(value);
-            }
+            Some(value) => Some(value),
             None => None,
         }
     }
@@ -71,7 +66,7 @@ impl VariableSet {
     pub fn parent(&self) -> Option<&VariableMap> {
         match self.stacked_vars.last() {
             Some(val) => Some(val.as_ref()),
-            None => return None,
+            None => None,
         }
     }
 

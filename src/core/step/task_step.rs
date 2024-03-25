@@ -138,6 +138,8 @@ impl TaskStepConfig {
                 StepEvaluationResult::SubmitTasks(tasks)
             }
             Some(map_over) => {
+                #[allow(clippy::useless_conversion)]
+                // Using 'into_iter' below is not useless, since we need a vector of Strings, not '&String's
                 let map_vars = Vec::from_iter(map_over.clone().into_iter());
                 let tasks = self._prepare_subtasks(step_i, vars, context, Some(&map_vars))?;
                 StepEvaluationResult::SubmitTasks(tasks)
@@ -163,7 +165,7 @@ impl StepMethods for TaskStepConfig {
         let vars = match &self.vars {
             None => vars.stack(StackMode::CopyLocals),
             Some(raw_vars) => {
-                vars.stack_raw_variables(&raw_vars, StackMode::EmptyLocals, &context, executor)
+                vars.stack_raw_variables(raw_vars, StackMode::EmptyLocals, &context, executor)
                     .await?
             }
         };
@@ -254,7 +256,7 @@ mod tests {
     #[test]
     fn test_env_dir() -> Result<()> {
         let env: HashMap<String, String> =
-            vec![(("WHO_YOU_GUNNA_CALL".to_string(), "mom?".to_string()))]
+            vec![("WHO_YOU_GUNNA_CALL".to_string(), "mom?".to_string())]
                 .into_iter()
                 .collect();
         let dir = "/".to_string();

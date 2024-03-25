@@ -76,7 +76,7 @@ pub fn main(args: RunArgs) -> Result<()> {
     // handle overrides
     let mut vars = VariableSet::new();
     for var in args.var.iter() {
-        let (key, value) = var.split_once("=").ok_or(anyhow!(
+        let (key, value) = var.split_once('=').ok_or(anyhow!(
             "A key value pair should be given as KEY=VALUE. Got '{}'",
             var
         ))?;
@@ -91,7 +91,5 @@ pub fn main(args: RunArgs) -> Result<()> {
 
     // Evaluate main task
     let future = evaluate_main_task(args, config, vars, &executor);
-    let output = smol::block_on((&executor.executor).run(future))?;
-
-    Ok(output)
+    smol::block_on((executor.executor).run(future))
 }

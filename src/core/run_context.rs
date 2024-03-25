@@ -49,7 +49,7 @@ impl RunContext {
         vars: &VariableSet,
     ) -> Result<Self> {
         let mut context = RunContext::default();
-        context.forcing = forcing.clone();
+        context.forcing = *forcing;
         context.update_dir(dir, vars)?;
         context.update_env(env, vars)?;
         Ok(context)
@@ -80,7 +80,7 @@ impl RunContext {
             forcing,
             env: self.env.clone(),
             dir: self.dir.clone(),
-            silent: self.silent.clone(),
+            silent: self.silent,
         }
     }
 

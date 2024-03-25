@@ -51,7 +51,7 @@ impl BasicStep {
         // Parse command entry
         let mut string_rep: Vec<String> = Vec::new();
         let entry = self.entry.evaluate_tokens_to_string("command", vars)?;
-        let entry_split = entry.split(" ").collect::<Vec<_>>();
+        let entry_split = entry.split(' ').collect::<Vec<_>>();
         let (true_entry, initial_cmd) = entry_split
             .split_first()
             .expect("Entrypoint should be splittable");
@@ -122,7 +122,7 @@ impl StepMethods for BasicStep {
         executor: &DigExecutor<'_>,
     ) -> Result<StepEvaluationResult> {
         let mut context = context.clone();
-        context.update(self.env.as_ref(), self.dir.as_ref(), self.silent, &vars)?;
+        context.update(self.env.as_ref(), self.dir.as_ref(), self.silent, vars)?;
 
         // Test If statements
         let exit_on_if = match &self.r#if {
@@ -305,9 +305,8 @@ mod test {
         vars.insert("KEY_1".into(), "cats".into());
         vars.insert("KEY_2".into(), "dogs".into());
 
-        let mut if_statements: Vec<String> = Vec::new();
-        if_statements.push("{{KEY_1}} = cats".into());
-        if_statements.push("{{KEY_2}} = monkeys".into());
+        let if_statements: Vec<String> =
+            vec!["{{KEY_1}} = cats".into(), "{{KEY_2}} = monkeys".into()];
 
         let cmdconfig = BasicStep {
             entry: "bash -c".into(),
