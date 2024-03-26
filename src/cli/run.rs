@@ -6,7 +6,6 @@ use crate::core::{
     config::DigConfig,
     executor::DigExecutor,
     run_context::{ForcingContext, RunContext},
-    task::PreparedTask,
     vars::{StackMode, VariableSet},
 };
 
@@ -60,16 +59,14 @@ async fn evaluate_main_task(
     };
     let context = RunContext::new(&forcing, config.env.as_ref(), config.dir.as_ref(), &vars)?;
 
-    let mut main_task = config
-        .get_task(&user_args.task)?
+    let main_task = config.get_task(&user_args.task)?;
+    let task_data = main_task
         .prepare("main", &vars, StackMode::EmptyLocals, &context, executor)
         .await?;
 
-    if let PreparedTask::Canceled(t) = main_task {
-        return Err(anyhow!("Task {} has been canceled", t.label));
-    };
-
-    main_task.evaluate(&config, false, executor).await?;
+    main_task
+        .evaluate(task_data, &config, false, executor)
+        .await?;
 
     Ok(())
 }

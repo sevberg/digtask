@@ -42,7 +42,8 @@ fn task_log_bad(label: &str, message: &str) {
 #[derive(Deserialize, Debug)]
 pub struct TaskConfig {
     pub label: Option<String>,
-    pub steps: Vec<StepConfig>, // Vec<TaskStep>,
+    pub dependencies: Option<Vec<StepConfig>>,
+    pub steps: Vec<StepConfig>,
     pub inputs: Option<Vec<String>>,
     pub outputs: Option<Vec<String>>,
     pub run_if: Option<RunGates>,
@@ -64,7 +65,7 @@ impl TaskConfig {
         stack_mode: StackMode,
         parent_context: &RunContext,
         executor: &DigExecutor<'_>,
-    ) -> Result<PreparedTask> {
+    ) -> Result<TaskEvaluationData> {
         let mut context = parent_context.child_context(self.forcing);
         let vars = match &self.vars {
             None => vars.stack(stack_mode),
@@ -80,37 +81,57 @@ impl TaskConfig {
             None => default_label.to_string(),
         };
 
+        Ok(TaskEvaluationData {
+            label,
+            vars,
+            context,
+        })
+    }
+
+    async fn test_cancel(
+        &self,
+        data: &TaskEvaluationData,
+        executor: &DigExecutor<'_>,
+    ) -> Result<Option<CanceledTask>> {
         // Handle cancling
         let run_gate_outcome =
-            test_run_gates(self.cancel_if.as_ref(), &vars, &context, executor).await?;
-        if run_gate_outcome.is_some() {
-            let (id, run_if_exit) = run_gate_outcome.unwrap();
-            return Ok(PreparedTask::Canceled(CanceledTask {
-                label,
+            test_run_gates(self.cancel_if.as_ref(), &data.vars, &data.context, executor).await?;
+        match run_gate_outcome {
+            Some((id, run_if_exit)) => Ok(Some(CanceledTask {
+                label: data.label.clone(),
                 reason: format!(
                     "cancel-if statement {} returned false: '{}'",
                     id, run_if_exit.statement
                 ),
-            }));
+            })),
+            None => Ok(None),
         }
+    }
 
+    async fn test_skip(
+        &self,
+        data: &TaskEvaluationData,
+        executor: &DigExecutor<'_>,
+    ) -> Result<Option<SkippedTask>> {
         // Handle skipping
-        let skip_reason = self.check_skip_state(&vars, &context, executor).await?;
+        let skip_reason = self
+            .check_skip_state(&data.vars, &data.context, executor)
+            .await?;
         match skip_reason {
             None => (),
-            Some(reason) => match context.is_forced() {
-                false => return Ok(PreparedTask::Skipped(SkippedTask { label, reason })),
+            Some(reason) => match data.context.is_forced() {
+                false => {
+                    return Ok(Some(SkippedTask {
+                        label: data.label.clone(),
+                        reason,
+                    }))
+                }
                 true => (),
             },
         }
 
         // Done
-        Ok(PreparedTask::Runnable(RunnableTask {
-            label,
-            steps: self.steps.clone(),
-            vars,
-            context,
-        }))
+        Ok(None)
     }
 
     async fn check_skip_state(
@@ -182,59 +203,74 @@ impl TaskConfig {
 
         Ok(first_modification)
     }
-}
 
-#[derive(Debug)]
-pub struct SkippedTask {
-    pub label: String,
-    pub reason: String,
-}
-
-impl SkippedTask {
-    fn evaluate(&self) -> Result<Option<Vec<String>>> {
-        task_log(&self.label, format!("skipped -- {}", self.reason).as_str());
-        Ok(None)
-    }
-}
-
-#[derive(Debug)]
-pub struct CanceledTask {
-    pub label: String,
-    pub reason: String,
-}
-
-impl CanceledTask {
-    fn evaluate(&self) -> Result<Option<Vec<String>>> {
-        task_log(&self.label, format!("canceled -- {}", self.reason).as_str());
-        Ok(None)
-    }
-}
-
-#[derive(Debug)]
-pub struct RunnableTask {
-    pub label: String,
-    pub steps: Vec<StepConfig>,
-    // pub inputs: Vec<String>,
-    // pub outputs: Vec<String>,
-    pub vars: VariableSet,
-    // pub forcing_behavior: ForcingBehaviour,
-    pub context: RunContext,
-}
-
-impl RunnableTask {
-    // #[async_recursion(?Send)]
+    #[async_recursion(?Send)]
     pub async fn evaluate(
-        &mut self,
+        &self,
+        mut data: TaskEvaluationData,
         config: &DigConfig,
         capture_output: bool,
         executor: &DigExecutor<'_>,
     ) -> Result<Option<Vec<String>>> {
-        task_log(&self.label, "Begin");
+        // Check for Canceling
+        if let Some(t) = self.test_cancel(&data, executor).await? {
+            task_log(&data.label, format!("Canceled: {}", t.reason).as_ref());
+            return Err(anyhow!("Task {} canceled", data.label));
+        }
+
+        // Evaluate Dependencies
+        let dependency_outputs = match &self.dependencies {
+            Some(dependencies) => {
+                task_log(&data.label, "Evaluating Depencies");
+
+                self.evaluate_steps(dependencies, &mut data, config, capture_output, executor)
+                    .await?
+            }
+            None => Vec::new(),
+        };
+
+        // Check for Skipping
+        if let Some(t) = self.test_skip(&data, executor).await? {
+            match &data.context.is_forced() {
+                true => task_log(&data.label, "Forced"),
+                false => {
+                    task_log(&data.label, format!("Skipped: {}", t.reason).as_ref());
+                    return Ok(None);
+                }
+            }
+        }
+
+        // Do evaluation
+        task_log(&data.label, "Begin");
+        let step_outputs = self
+            .evaluate_steps(&self.steps, &mut data, config, capture_output, executor)
+            .await?;
+
+        task_log(&data.label, "Finished");
+
+        // Finalize
+        match capture_output {
+            true => {
+                let outputs = [dependency_outputs, step_outputs].concat();
+                Ok(Some(outputs))
+            }
+            false => Ok(None),
+        }
+    }
+
+    async fn evaluate_steps(
+        &self,
+        steps: &[StepConfig],
+        data: &mut TaskEvaluationData,
+        config: &DigConfig,
+        capture_output: bool,
+        executor: &DigExecutor<'_>,
+    ) -> Result<Vec<String>> {
         let mut outputs = Vec::new();
 
-        for (step_i, step) in self.steps.iter().enumerate() {
+        for (step_i, step) in steps.iter().enumerate() {
             let step_output = step
-                .evaluate(step_i, &self.vars, &self.context, executor)
+                .evaluate(step_i, &data.vars, &data.context, executor)
                 .await?;
 
             let subtasks = match step_output {
@@ -254,7 +290,7 @@ impl RunnableTask {
                     // Check for storage
                     match step.get_store() {
                         Some(key) => {
-                            self.vars.insert(key.clone(), step_output_value);
+                            data.vars.insert(key.clone(), step_output_value);
                             None
                         }
                         None => None,
@@ -268,6 +304,7 @@ impl RunnableTask {
                     let mut subtask_futures = Vec::new();
                     for subtask in subtasks.iter() {
                         subtask_futures.push(self.evaluate_subtask(
+                            data,
                             config,
                             subtask,
                             capture_output,
@@ -297,16 +334,12 @@ impl RunnableTask {
             }
         }
 
-        task_log(&self.label, "Finished");
-
-        match capture_output {
-            true => Ok(Some(outputs)),
-            false => Ok(None),
-        }
+        Ok(outputs)
     }
 
     async fn evaluate_subtask(
         &self,
+        data: &TaskEvaluationData,
         config: &DigConfig,
         subtask: &PreparedTaskStep,
         capture_output: bool,
@@ -314,45 +347,39 @@ impl RunnableTask {
     ) -> Result<Option<Vec<String>>> {
         let subtask_config = config.get_task(&subtask.task)?;
         // let subtask_context = self.context.child_context(subtask_config.forcing);
-        let mut subtask = subtask_config
+        let subtask_data = subtask_config
             .prepare(
                 &subtask.task,
                 &subtask.vars,
                 StackMode::EmptyLocals,
-                &self.context,
+                &data.context,
                 executor,
             )
             .await?;
 
-        if let PreparedTask::Canceled(t) = subtask {
-            return Err(anyhow!("Subtask {} has been canceled", t.label));
-        };
-
-        subtask.evaluate(config, capture_output, executor).await
+        subtask_config
+            .evaluate(subtask_data, config, capture_output, executor)
+            .await
     }
 }
 
-pub enum PreparedTask {
-    Runnable(RunnableTask),
-    Skipped(SkippedTask),
-    Canceled(CanceledTask),
+#[derive(Debug)]
+pub struct SkippedTask {
+    pub label: String,
+    pub reason: String,
 }
 
-impl PreparedTask {
-    #[async_recursion(?Send)]
-    pub async fn evaluate(
-        &mut self,
-        config: &DigConfig,
-        capture_output: bool,
-        executor: &DigExecutor<'_>,
-    ) -> Result<Option<Vec<String>>> {
-        let out = match self {
-            PreparedTask::Runnable(t) => t.evaluate(config, capture_output, executor).await?,
-            PreparedTask::Skipped(t) => t.evaluate()?,
-            PreparedTask::Canceled(t) => t.evaluate()?,
-        };
-        Ok(out)
-    }
+#[derive(Debug)]
+pub struct CanceledTask {
+    pub label: String,
+    pub reason: String,
+}
+
+#[derive(Debug)]
+pub struct TaskEvaluationData {
+    pub label: String,
+    pub vars: VariableSet,
+    pub context: RunContext,
 }
 
 #[cfg(test)]
@@ -378,6 +405,7 @@ mod tests {
     fn _make_task_prepare_country() -> TaskConfig {
         TaskConfig {
             label: Some("prepare_country".into()),
+            dependencies: None,
             steps: vec!["echo PREPARING: {{iso3}}".into()],
             inputs: None,
             outputs: None,
@@ -398,6 +426,7 @@ mod tests {
     fn _make_task_analyze_country() -> TaskConfig {
         TaskConfig {
             label: Some("analyze_country".into()),
+            dependencies: None,
             steps: vec![
                 StepConfig::Single(SingularStepConfig::Task(TaskStepConfig {
                     task: "prepare_country".into(),
@@ -431,6 +460,7 @@ mod tests {
     fn _make_task_analyze_all_countries() -> TaskConfig {
         TaskConfig {
             label: Some("analyze_all_countries".into()),
+            dependencies: None,
             steps: vec![StepConfig::Single(SingularStepConfig::Task(
                 TaskStepConfig {
                     task: "analyze_country".into(),
@@ -463,13 +493,13 @@ mod tests {
         let vars = _make_vars();
         let task = _make_task_prepare_country();
         let context = RunContext::default();
-        let mut prepared_task = testing_block_on!(
+        let task_data = testing_block_on!(
             ex,
             task.prepare("test", &vars, StackMode::EmptyLocals, &context, &ex)
         )?;
 
         let config = DigConfig::new();
-        let outputs = testing_block_on!(ex, prepared_task.evaluate(&config, true, &ex))?;
+        let outputs = testing_block_on!(ex, task.evaluate(task_data, &config, true, &ex))?;
 
         match outputs {
             None => bail!("Expected outputs not present"),
@@ -485,13 +515,13 @@ mod tests {
         vars.insert("iso3".into(), json!("MEX"));
         let task = _make_task_prepare_country();
         let context = RunContext::default();
-        let mut prepared_task = testing_block_on!(
+        let task_data = testing_block_on!(
             ex,
             task.prepare("test", &vars, StackMode::EmptyLocals, &context, &ex)
         )?;
 
         let config = DigConfig::new();
-        let outputs = testing_block_on!(ex, prepared_task.evaluate(&config, true, &ex))?;
+        let outputs = testing_block_on!(ex, task.evaluate(task_data, &config, true, &ex))?;
 
         match outputs {
             None => bail!("Expected outputs not present"),
@@ -508,15 +538,15 @@ mod tests {
         config
             .tasks
             .insert("prepare_country".into(), _make_task_prepare_country());
-        let main_task = _make_task_analyze_country();
+        let task = _make_task_analyze_country();
 
         let context = RunContext::default();
-        let mut prepared_task = testing_block_on!(
+        let task_data = testing_block_on!(
             ex,
-            main_task.prepare("test", &vars, StackMode::EmptyLocals, &context, &ex)
+            task.prepare("test", &vars, StackMode::EmptyLocals, &context, &ex)
         )?;
 
-        let outputs = testing_block_on!(ex, prepared_task.evaluate(&config, true, &ex))?;
+        let outputs = testing_block_on!(ex, task.evaluate(task_data, &config, true, &ex))?;
 
         match outputs {
             None => bail!("Expected outputs not present"),
@@ -536,15 +566,15 @@ mod tests {
         config
             .tasks
             .insert("analyze_country".into(), _make_task_analyze_country());
-        let main_task = _make_task_analyze_all_countries();
+        let task = _make_task_analyze_all_countries();
 
         let context = RunContext::default();
-        let mut prepared_task = testing_block_on!(
+        let task_data = testing_block_on!(
             ex,
-            main_task.prepare("test", &vars, StackMode::EmptyLocals, &context, &ex)
+            task.prepare("test", &vars, StackMode::EmptyLocals, &context, &ex)
         )?;
 
-        let outputs = testing_block_on!(ex, prepared_task.evaluate(&config, true, &ex))?;
+        let outputs = testing_block_on!(ex, task.evaluate(task_data, &config, true, &ex))?;
 
         match outputs {
             None => bail!("Expected outputs not present"),
@@ -570,6 +600,7 @@ mod tests {
 
         let task = TaskConfig {
             label: Some("dir_env".into()),
+            dependencies: None,
             steps: vec!["echo \"I am the ${SOME_ENV}\"".into(), "pwd".into()],
             inputs: None,
             outputs: None,
@@ -591,13 +622,13 @@ mod tests {
         };
 
         let context = RunContext::default();
-        let mut prepared_task = testing_block_on!(
+        let task_data = testing_block_on!(
             ex,
             task.prepare("test", &vars, StackMode::EmptyLocals, &context, &ex)
         )?;
 
         let config = DigConfig::new();
-        let outputs = testing_block_on!(ex, prepared_task.evaluate(&config, true, &ex))?;
+        let outputs = testing_block_on!(ex, task.evaluate(task_data, &config, true, &ex))?;
 
         match outputs {
             None => bail!("Expected outputs not present"),
