@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use async_recursion::async_recursion;
 use futures::future::join_all;
 use serde::Deserialize;
-use serde_json::Value as JsonValue;
+use serde_json::{json, Value as JsonValue};
 
 use crate::core::{
     common::default_false,
@@ -33,7 +33,6 @@ fn task_log(label: &str, message: &str) {
     println!("{}", message)
 }
 
-#[allow(dead_code)]
 fn task_log_bad(label: &str, message: &str) {
     let message = format!("TASK:{} -- {}", label, message).red();
     eprintln!("{}", message)
@@ -44,6 +43,7 @@ pub struct TaskConfig {
     pub label: Option<String>,
     pub presteps: Option<Vec<StepConfig>>,
     pub steps: Vec<StepConfig>,
+    pub poststeps: Option<Vec<StepConfig>>,
     pub inputs: Option<Vec<String>>,
     pub outputs: Option<Vec<String>>,
     pub r#if: Option<RunGates>,
@@ -94,17 +94,26 @@ impl TaskConfig {
         executor: &DigExecutor<'_>,
     ) -> Result<Option<CanceledTask>> {
         // Handle cancling
+        if self.unless.is_none() {
+            return Ok(None);
+        }
+
         let run_gate_outcome =
             test_run_gates(self.unless.as_ref(), &data.vars, &data.context, executor).await?;
         match run_gate_outcome {
-            Some((id, r#if_exit)) => Ok(Some(CanceledTask {
+            // Some((id, r#if_exit)) => Ok(Some(CanceledTask {
+            //     label: data.label.clone(),
+            //     reason: format!(
+            //         "cancel-if statement {} returned false: '{}'",
+            //         id, r#if_exit.statement
+            //     ),
+            // })),
+            // None => Ok(None),
+            Some(_) => Ok(None),
+            None => Ok(Some(CanceledTask {
                 label: data.label.clone(),
-                reason: format!(
-                    "cancel-if statement {} returned false: '{}'",
-                    id, r#if_exit.statement
-                ),
+                reason: "all unless-statements returned true".to_string(),
             })),
-            None => Ok(None),
         }
     }
 
@@ -218,9 +227,9 @@ impl TaskConfig {
         }
 
         // Evaluate Dependencies
-        let dependency_outputs = match &self.presteps {
+        let pretest_outputs = match &self.presteps {
             Some(presteps) => {
-                task_log(&data.label, "Evaluating Depencies");
+                task_log(&data.label, "Evaluating Dependencies");
 
                 self.evaluate_steps(presteps, &mut data, config, capture_output, executor)
                     .await?
@@ -243,14 +252,58 @@ impl TaskConfig {
         task_log(&data.label, "Begin");
         let step_outputs = self
             .evaluate_steps(&self.steps, &mut data, config, capture_output, executor)
-            .await?;
+            .await;
+
+        match step_outputs {
+            Ok(_) => data.vars.insert("SUCCESS".to_string(), json!(true)),
+            Err(_) => data.vars.insert("SUCCESS".to_string(), json!(false)),
+        }
+
+        // Evaluate post-steps
+        let poststep_outputs = match &self.poststeps {
+            Some(poststeps) => {
+                task_log(&data.label, "Evaluating post-steps");
+
+                self.evaluate_steps(poststeps, &mut data, config, capture_output, executor)
+                    .await
+            }
+            None => Ok(Vec::new()),
+        };
+
+        // Handle errors
+        let (step_outputs, poststep_outputs) = match step_outputs {
+            Ok(step_outputs) => match poststep_outputs {
+                Ok(poststep_outputs) => (step_outputs, poststep_outputs),
+                Err(poststep_error) => {
+                    task_log_bad(&data.label, "Task succeeded, but post-steps failed");
+                    return Err(poststep_error);
+                }
+            },
+            Err(step_error) => match poststep_outputs {
+                Ok(_) => {
+                    task_log_bad(&data.label, "Task failed");
+                    return Err(step_error);
+                }
+                Err(poststep_error) => {
+                    task_log_bad(
+                        &data.label,
+                        format!(
+                            "Task failed:\n{}\n\nAnd then post-steps failed as well",
+                            step_error
+                        )
+                        .as_str(),
+                    );
+                    return Err(poststep_error);
+                }
+            },
+        };
 
         task_log(&data.label, "Finished");
 
         // Finalize
         match capture_output {
             true => {
-                let outputs = [dependency_outputs, step_outputs].concat();
+                let outputs = [pretest_outputs, step_outputs, poststep_outputs].concat();
                 Ok(Some(outputs))
             }
             false => Ok(None),
@@ -406,6 +459,7 @@ mod tests {
             label: Some("prepare_country".into()),
             presteps: None,
             steps: vec!["echo PREPARING: {{iso3}}".into()],
+            poststeps: None,
             inputs: None,
             outputs: None,
             r#if: None,
@@ -440,6 +494,7 @@ mod tests {
                     "echo ANALYZING: {{iso3}}".into(),
                 )),
             ],
+            poststeps: None,
             inputs: None,
             outputs: None,
             r#if: None,
@@ -475,6 +530,7 @@ mod tests {
                     silent: false,
                 },
             ))],
+            poststeps: None,
             inputs: None,
             outputs: None,
             r#if: None,
@@ -601,6 +657,7 @@ mod tests {
             label: Some("dir_env".into()),
             presteps: None,
             steps: vec!["echo \"I am the ${SOME_ENV}\"".into(), "pwd".into()],
+            poststeps: None,
             inputs: None,
             outputs: None,
             r#if: None,
