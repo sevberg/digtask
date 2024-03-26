@@ -1,6 +1,6 @@
 use std::{fs, path::Path, time::SystemTime};
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_recursion::async_recursion;
 use futures::future::join_all;
 use serde::Deserialize;
@@ -46,6 +46,7 @@ pub struct TaskConfig {
     pub inputs: Option<Vec<String>>,
     pub outputs: Option<Vec<String>>,
     pub run_if: Option<RunGates>,
+    pub cancel_if: Option<RunGates>,
     #[serde(default = "default_false")]
     pub silent: bool,
     pub vars: Option<RawVariableMap>,
@@ -79,18 +80,32 @@ impl TaskConfig {
             None => default_label.to_string(),
         };
 
+        // Handle cancling
+        let run_gate_outcome =
+            test_run_gates(self.cancel_if.as_ref(), &vars, &context, executor).await?;
+        if run_gate_outcome.is_some() {
+            let (id, run_if_exit) = run_gate_outcome.unwrap();
+            return Ok(PreparedTask::Canceled(CanceledTask {
+                label,
+                reason: format!(
+                    "cancel-if statement {} returned false: '{}'",
+                    id, run_if_exit.statement
+                ),
+            }));
+        }
+
         // Handle skipping
         let skip_reason = self.check_skip_state(&vars, &context, executor).await?;
         match skip_reason {
             None => (),
             Some(reason) => match context.is_forced() {
-                false => return Ok(PreparedTask::SkippedTask(SkippedTask { label, reason })),
+                false => return Ok(PreparedTask::Skipped(SkippedTask { label, reason })),
                 true => (),
             },
         }
 
         // Done
-        Ok(PreparedTask::RunnableTask(RunnableTask {
+        Ok(PreparedTask::Runnable(RunnableTask {
             label,
             steps: self.steps.clone(),
             vars,
@@ -183,6 +198,19 @@ impl SkippedTask {
 }
 
 #[derive(Debug)]
+pub struct CanceledTask {
+    pub label: String,
+    pub reason: String,
+}
+
+impl CanceledTask {
+    fn evaluate(&self) -> Result<Option<Vec<String>>> {
+        task_log(&self.label, format!("canceled -- {}", self.reason).as_str());
+        Ok(None)
+    }
+}
+
+#[derive(Debug)]
 pub struct RunnableTask {
     pub label: String,
     pub steps: Vec<StepConfig>,
@@ -239,7 +267,7 @@ impl RunnableTask {
                 Some(subtasks) => {
                     let mut subtask_futures = Vec::new();
                     for subtask in subtasks.iter() {
-                        subtask_futures.push(self.make_subtask_future(
+                        subtask_futures.push(self.evaluate_subtask(
                             config,
                             subtask,
                             capture_output,
@@ -277,7 +305,7 @@ impl RunnableTask {
         }
     }
 
-    async fn make_subtask_future(
+    async fn evaluate_subtask(
         &self,
         config: &DigConfig,
         subtask: &PreparedTaskStep,
@@ -296,13 +324,18 @@ impl RunnableTask {
             )
             .await?;
 
+        if let PreparedTask::Canceled(t) = subtask {
+            return Err(anyhow!("Subtask {} has been canceled", t.label));
+        };
+
         subtask.evaluate(config, capture_output, executor).await
     }
 }
 
 pub enum PreparedTask {
-    RunnableTask(RunnableTask),
-    SkippedTask(SkippedTask),
+    Runnable(RunnableTask),
+    Skipped(SkippedTask),
+    Canceled(CanceledTask),
 }
 
 impl PreparedTask {
@@ -314,8 +347,9 @@ impl PreparedTask {
         executor: &DigExecutor<'_>,
     ) -> Result<Option<Vec<String>>> {
         let out = match self {
-            PreparedTask::RunnableTask(t) => t.evaluate(config, capture_output, executor).await?,
-            PreparedTask::SkippedTask(t) => t.evaluate()?,
+            PreparedTask::Runnable(t) => t.evaluate(config, capture_output, executor).await?,
+            PreparedTask::Skipped(t) => t.evaluate()?,
+            PreparedTask::Canceled(t) => t.evaluate()?,
         };
         Ok(out)
     }
@@ -348,6 +382,7 @@ mod tests {
             inputs: None,
             outputs: None,
             run_if: None,
+            cancel_if: None,
             silent: false,
             vars: Some(
                 vec![("iso3".to_string(), RawVariable::Json("DEU".into()))]
@@ -380,6 +415,7 @@ mod tests {
             inputs: None,
             outputs: None,
             run_if: None,
+            cancel_if: None,
             silent: true,
             vars: Some(
                 vec![("iso3".to_string(), RawVariable::Json("GBR".into()))]
@@ -413,6 +449,7 @@ mod tests {
             inputs: None,
             outputs: None,
             run_if: None,
+            cancel_if: None,
             silent: true,
             vars: None,
             forcing: ForcingBehaviour::Inherit,
@@ -537,6 +574,7 @@ mod tests {
             inputs: None,
             outputs: None,
             run_if: None,
+            cancel_if: None,
             silent: true,
             vars: Some(
                 vec![("iso3".to_string(), RawVariable::Json("DEU".into()))]

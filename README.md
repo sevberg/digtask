@@ -18,5 +18,4 @@
 * **dig list**: CLI command to list available tasks
   * Add task config to allow hiding tasks
 * **dig summary [TASK]**: A CLI command to print a description of a specified task
-* **run_if and skip_if**: Change 'if' configs to 'run_if', and implement the inverse 'skip_if'
 * **prevent duplication**: Keep track of executed tasks, and prevent duplicate runs (unless specifically allowed)

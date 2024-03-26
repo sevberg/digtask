@@ -5,8 +5,8 @@ use serde_json::json;
 use crate::core::{
     config::DigConfig,
     executor::DigExecutor,
-    run_context::ForcingContext,
-    run_context::RunContext,
+    run_context::{ForcingContext, RunContext},
+    task::PreparedTask,
     vars::{StackMode, VariableSet},
 };
 
@@ -64,6 +64,10 @@ async fn evaluate_main_task(
         .get_task(&user_args.task)?
         .prepare("main", &vars, StackMode::EmptyLocals, &context, executor)
         .await?;
+
+    if let PreparedTask::Canceled(t) = main_task {
+        return Err(anyhow!("Task {} has been canceled", t.label));
+    };
 
     main_task.evaluate(&config, false, executor).await?;
 
