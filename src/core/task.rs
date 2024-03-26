@@ -33,6 +33,7 @@ fn task_log(label: &str, message: &str) {
     println!("{}", message)
 }
 
+#[allow(dead_code)]
 fn task_log_bad(label: &str, message: &str) {
     let message = format!("TASK:{} -- {}", label, message).red();
     eprintln!("{}", message)
@@ -115,10 +116,12 @@ impl TaskConfig {
         }
 
         // Test inputs/outputs
-        let latest_input = self.get_latest_input(vars)?;
-        let earliest_output = self.get_earliest_output(vars)?;
-        if earliest_output > latest_input {
-            return Ok(Some("all outputs are up to date'".to_string()));
+        if self.inputs.is_some() {
+            let latest_input = self.get_latest_input(vars)?;
+            let earliest_output = self.get_earliest_output(vars)?;
+            if earliest_output > latest_input {
+                return Ok(Some("all outputs are up to date'".to_string()));
+            }
         }
 
         // done
@@ -174,10 +177,7 @@ pub struct SkippedTask {
 
 impl SkippedTask {
     fn evaluate(&self) -> Result<Option<Vec<String>>> {
-        task_log(
-            &self.label,
-            format!("skipped due to {}", self.reason).as_str(),
-        );
+        task_log(&self.label, format!("skipped -- {}", self.reason).as_str());
         Ok(None)
     }
 }
