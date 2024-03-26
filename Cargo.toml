@@ -7,6 +7,7 @@ author = "(David) Severin Ryberg <s.ryberg@dras.tech>"
 license-file = "LICENSE.txt"
 keywords = ["task", "automation", "orchestration", "runner", "utility"]
 categories = ["asynchronous", "command-line-utilities", "concurrency", "development-tools::build-utils", "filesystem"]
+repository = "https://github.com/sevberg/digtask"
 
 [[bin]]
 name = "dig"
