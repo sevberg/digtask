@@ -42,12 +42,12 @@ fn task_log_bad(label: &str, message: &str) {
 #[derive(Deserialize, Debug)]
 pub struct TaskConfig {
     pub label: Option<String>,
-    pub dependencies: Option<Vec<StepConfig>>,
+    pub presteps: Option<Vec<StepConfig>>,
     pub steps: Vec<StepConfig>,
     pub inputs: Option<Vec<String>>,
     pub outputs: Option<Vec<String>>,
-    pub run_if: Option<RunGates>,
-    pub cancel_if: Option<RunGates>,
+    pub r#if: Option<RunGates>,
+    pub unless: Option<RunGates>,
     #[serde(default = "default_false")]
     pub silent: bool,
     pub vars: Option<RawVariableMap>,
@@ -95,13 +95,13 @@ impl TaskConfig {
     ) -> Result<Option<CanceledTask>> {
         // Handle cancling
         let run_gate_outcome =
-            test_run_gates(self.cancel_if.as_ref(), &data.vars, &data.context, executor).await?;
+            test_run_gates(self.unless.as_ref(), &data.vars, &data.context, executor).await?;
         match run_gate_outcome {
-            Some((id, run_if_exit)) => Ok(Some(CanceledTask {
+            Some((id, r#if_exit)) => Ok(Some(CanceledTask {
                 label: data.label.clone(),
                 reason: format!(
                     "cancel-if statement {} returned false: '{}'",
-                    id, run_if_exit.statement
+                    id, r#if_exit.statement
                 ),
             })),
             None => Ok(None),
@@ -141,13 +141,12 @@ impl TaskConfig {
         executor: &DigExecutor<'_>,
     ) -> Result<Option<String>> {
         // Test Run-If statemennts
-        let run_gate_outcome =
-            test_run_gates(self.run_if.as_ref(), vars, context, executor).await?;
+        let run_gate_outcome = test_run_gates(self.r#if.as_ref(), vars, context, executor).await?;
         if run_gate_outcome.is_some() {
-            let (id, run_if_exit) = run_gate_outcome.unwrap();
+            let (id, r#if_exit) = run_gate_outcome.unwrap();
             return Ok(Some(format!(
                 "run-if statement {} returned false: '{}'",
-                id, run_if_exit.statement
+                id, r#if_exit.statement
             )));
         }
 
@@ -219,11 +218,11 @@ impl TaskConfig {
         }
 
         // Evaluate Dependencies
-        let dependency_outputs = match &self.dependencies {
-            Some(dependencies) => {
+        let dependency_outputs = match &self.presteps {
+            Some(presteps) => {
                 task_log(&data.label, "Evaluating Depencies");
 
-                self.evaluate_steps(dependencies, &mut data, config, capture_output, executor)
+                self.evaluate_steps(presteps, &mut data, config, capture_output, executor)
                     .await?
             }
             None => Vec::new(),
@@ -405,12 +404,12 @@ mod tests {
     fn _make_task_prepare_country() -> TaskConfig {
         TaskConfig {
             label: Some("prepare_country".into()),
-            dependencies: None,
+            presteps: None,
             steps: vec!["echo PREPARING: {{iso3}}".into()],
             inputs: None,
             outputs: None,
-            run_if: None,
-            cancel_if: None,
+            r#if: None,
+            unless: None,
             silent: false,
             vars: Some(
                 vec![("iso3".to_string(), RawVariable::Json("DEU".into()))]
@@ -426,14 +425,14 @@ mod tests {
     fn _make_task_analyze_country() -> TaskConfig {
         TaskConfig {
             label: Some("analyze_country".into()),
-            dependencies: None,
+            presteps: None,
             steps: vec![
                 StepConfig::Single(SingularStepConfig::Task(TaskStepConfig {
                     task: "prepare_country".into(),
                     vars: None,
                     env: None,
                     dir: None,
-                    run_if: None,
+                    r#if: None,
                     over: None,
                     silent: false,
                 })),
@@ -443,8 +442,8 @@ mod tests {
             ],
             inputs: None,
             outputs: None,
-            run_if: None,
-            cancel_if: None,
+            r#if: None,
+            unless: None,
             silent: true,
             vars: Some(
                 vec![("iso3".to_string(), RawVariable::Json("GBR".into()))]
@@ -460,14 +459,14 @@ mod tests {
     fn _make_task_analyze_all_countries() -> TaskConfig {
         TaskConfig {
             label: Some("analyze_all_countries".into()),
-            dependencies: None,
+            presteps: None,
             steps: vec![StepConfig::Single(SingularStepConfig::Task(
                 TaskStepConfig {
                     task: "analyze_country".into(),
                     vars: None,
                     env: None,
                     dir: None,
-                    run_if: None,
+                    r#if: None,
                     over: Some(
                         vec![("iso3".to_string(), "{{COUNTRIES}}".to_string())]
                             .into_iter()
@@ -478,8 +477,8 @@ mod tests {
             ))],
             inputs: None,
             outputs: None,
-            run_if: None,
-            cancel_if: None,
+            r#if: None,
+            unless: None,
             silent: true,
             vars: None,
             forcing: ForcingBehaviour::Inherit,
@@ -600,12 +599,12 @@ mod tests {
 
         let task = TaskConfig {
             label: Some("dir_env".into()),
-            dependencies: None,
+            presteps: None,
             steps: vec!["echo \"I am the ${SOME_ENV}\"".into(), "pwd".into()],
             inputs: None,
             outputs: None,
-            run_if: None,
-            cancel_if: None,
+            r#if: None,
+            unless: None,
             silent: true,
             vars: Some(
                 vec![("iso3".to_string(), RawVariable::Json("DEU".into()))]

@@ -22,7 +22,7 @@ pub struct BashStep {
     pub bash: String,
     pub env: Option<HashMap<String, String>>,
     pub dir: Option<String>,
-    pub run_if: Option<Vec<String>>,
+    pub r#if: Option<Vec<String>>,
     pub store: Option<String>,
     #[serde(default = "default_false")]
     pub silent: bool,
@@ -35,7 +35,7 @@ impl BashStep {
             bash: command.to_string(),
             env: None,
             dir: None,
-            run_if: None,
+            r#if: None,
             store: None,
             silent: false,
         }
@@ -60,7 +60,7 @@ impl StepMethods for BashStep {
             cmd: RawCommandEntry::Single(self.bash.clone()),
             env: self.env.clone(),
             dir: self.dir.clone(),
-            run_if: self.run_if.clone(),
+            r#if: self.r#if.clone(),
             store: self.store.clone(),
             silent: self.silent,
         }
@@ -84,7 +84,7 @@ mod test {
             bash: "whoami".into(),
             env: None,
             dir: None,
-            run_if: None,
+            r#if: None,
             store: None,
             silent: false,
         };

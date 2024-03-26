@@ -18,7 +18,7 @@ pub struct TaskStepConfig {
     pub vars: Option<RawVariableMap>,
     pub env: EnvConfig,
     pub dir: DirConfig,
-    pub run_if: Option<Vec<String>>,
+    pub r#if: Option<Vec<String>>,
     pub over: Option<HashMap<String, String>>,
     #[serde(default = "default_false")]
     pub silent: bool,
@@ -32,7 +32,7 @@ impl TaskStepConfig {
     //     executor: &DigExecutor<'_>,
     // ) -> Result<Option<(usize, String)>> {
     //     // Test If statements
-    //     match &self.run_if {
+    //     match &self.r#if {
     //         None => Ok(None),
     //         Some(statements) => {
     //             let mut output = None;
@@ -171,7 +171,7 @@ impl StepMethods for TaskStepConfig {
         };
         context.update(self.env.as_ref(), self.dir.as_ref(), self.silent, &vars)?;
 
-        let runif_result = test_run_gates(self.run_if.as_ref(), &vars, &context, executor).await?;
+        let runif_result = test_run_gates(self.r#if.as_ref(), &vars, &context, executor).await?;
         let output = match runif_result {
             Some((id, exit)) => {
                 self.log(
@@ -225,7 +225,7 @@ mod tests {
             vars: None,
             env: None,
             dir: None,
-            run_if: None,
+            r#if: None,
             over: None,
             silent: false,
         };
@@ -263,7 +263,7 @@ mod tests {
             vars: None,
             env: Some(env.clone()),
             dir: Some(dir.clone()),
-            run_if: None,
+            r#if: None,
             over: None,
             silent: false,
         };
@@ -294,7 +294,7 @@ mod tests {
             vars: None,
             env: None,
             dir: None,
-            run_if: Some(vec!["\"cats\" = \"dogs\"".into()]),
+            r#if: Some(vec!["\"cats\" = \"dogs\"".into()]),
             over: None,
             silent: false,
         };
@@ -320,7 +320,7 @@ mod tests {
             vars: Some(RawVariableMap::new()),
             env: None,
             dir: None,
-            run_if: None,
+            r#if: None,
             over: None,
             silent: false,
         };
@@ -351,7 +351,7 @@ mod tests {
             vars: Some(_make_raw_vars()),
             env: None,
             dir: None,
-            run_if: None,
+            r#if: None,
             over: Some(
                 vec![("key3".to_string(), "{{key1}}".to_string())]
                     .into_iter()

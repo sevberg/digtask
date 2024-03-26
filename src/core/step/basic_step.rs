@@ -41,7 +41,7 @@ pub struct BasicStep {
     pub entry: String,
     pub env: EnvConfig,
     pub dir: DirConfig,
-    pub run_if: Option<RunGates>,
+    pub r#if: Option<RunGates>,
     pub store: Option<String>,
     #[serde(default = "default_false")]
     pub silent: bool,
@@ -106,7 +106,7 @@ impl StepMethods for BasicStep {
         context.update(self.env.as_ref(), self.dir.as_ref(), self.silent, vars)?;
 
         // Test Run-If statements
-        let exit_on_if = test_run_gates(self.run_if.as_ref(), vars, &context, executor).await?;
+        let exit_on_if = test_run_gates(self.r#if.as_ref(), vars, &context, executor).await?;
         if exit_on_if.is_some() {
             let (stmt_id, exit) = exit_on_if.unwrap();
             println!(
@@ -176,7 +176,7 @@ mod test {
             entry: "whoami".into(),
             env: None,
             dir: None,
-            run_if: None,
+            r#if: None,
             store: None,
             silent: false,
         };
@@ -198,7 +198,7 @@ mod test {
             entry: "whoamiwhoamiwhoami".into(),
             env: None,
             dir: None,
-            run_if: None,
+            r#if: None,
             store: None,
             silent: false,
         };
@@ -221,7 +221,7 @@ mod test {
             cmd: RawCommandEntry::Single("pwd".into()),
             dir: Some("/".into()),
             env: None,
-            run_if: None,
+            r#if: None,
             store: None,
             silent: false,
         };
@@ -249,7 +249,7 @@ mod test {
             cmd: RawCommandEntry::Single("echo \"${IM_AN_ENV}, but ${IM_A_{{KEY_1}}}\"".into()),
             dir: None,
             env: Some(envmap),
-            run_if: None,
+            r#if: None,
             store: None,
             silent: false,
         };
@@ -278,7 +278,7 @@ mod test {
             cmd: RawCommandEntry::Single("badcommand".into()),
             dir: None,
             env: None,
-            run_if: Some(if_statements),
+            r#if: Some(if_statements),
             store: None,
             silent: false,
         };
@@ -303,7 +303,7 @@ mod test {
             cmd: RawCommandEntry::Many(vec!["-c".into(), "date +%s".into()]),
             env: None,
             dir: None,
-            run_if: None,
+            r#if: None,
             store: None,
             silent: false,
         };
@@ -339,7 +339,7 @@ mod test {
             cmd: RawCommandEntry::Many(vec!["-c".into(), "{{hats}} +%s".into()]),
             env: None,
             dir: None,
-            run_if: None,
+            r#if: None,
             store: None,
             silent: false,
         };
