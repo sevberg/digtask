@@ -6,7 +6,6 @@ use crate::core::{
 };
 
 use anyhow::{anyhow, bail, Result};
-use colored::Colorize;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
