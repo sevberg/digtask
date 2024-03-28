@@ -311,7 +311,7 @@ mod test {
         match outcome {
             StepEvaluationResult::SkippedDueToIfStatement((i, statement)) => {
                 assert_eq!(i, 1);
-                assert_eq!(statement, "dogs = monkeys".to_string());
+                assert_eq!(statement, "\"dogs\" = \"monkeys\"".to_string());
             }
             _ => bail!("Did not skip as expected"),
         }
