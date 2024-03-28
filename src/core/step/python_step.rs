@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use crate::core::{
     common::default_false,
     executor::DigExecutor,
+    gate::RunGates,
     run_context::RunContext,
     step::{
         basic_step::{BasicStep, RawCommandEntry},
@@ -68,7 +69,7 @@ pub struct PythonStep {
     pub py: String,
     pub env: Option<HashMap<String, String>>,
     pub dir: Option<String>,
-    pub r#if: Option<Vec<String>>,
+    pub r#if: Option<RunGates>,
     pub store: Option<String>,
     #[serde(default = "PythonStepTypeConfig::default")]
     pub r#type: PythonStepTypeConfig,

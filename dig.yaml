@@ -35,7 +35,7 @@ tasks:
       - "echo $(pwd)"
       - bash: "touch data/prepared_{{iso3}}-{{NAME}}.output"
         if:
-          - '"dogs" = "{{NOW}}"'
+          - '"dogs" = {{NOW}}'
       #   store: newvar
     # inputs:
     #   - data/input_{{iso3}}.csv

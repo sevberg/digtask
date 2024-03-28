@@ -2,7 +2,7 @@ use crate::core::{
     common::default_false,
     config::{DirConfig, EnvConfig},
     executor::DigExecutor,
-    gate::test_run_gates,
+    gate::{test_run_gates, RunGates},
     run_context::RunContext,
     step::common::{StepEvaluationResult, StepMethods},
     token::TokenedJsonValue,
@@ -18,7 +18,7 @@ pub struct TaskStepConfig {
     pub vars: Option<RawVariableMap>,
     pub env: EnvConfig,
     pub dir: DirConfig,
-    pub r#if: Option<Vec<String>>,
+    pub r#if: Option<RunGates>,
     pub over: Option<HashMap<String, String>>,
     #[serde(default = "default_false")]
     pub silent: bool,

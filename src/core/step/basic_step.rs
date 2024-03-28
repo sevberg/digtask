@@ -294,8 +294,7 @@ mod test {
         vars.insert("KEY_1".into(), "cats".into());
         vars.insert("KEY_2".into(), "dogs".into());
 
-        let if_statements: Vec<String> =
-            vec!["{{KEY_1}} = cats".into(), "{{KEY_2}} = monkeys".into()];
+        let if_statements: RunGates = vec!["{{KEY_1}} = cats".into(), "{{KEY_2}} = monkeys".into()];
 
         let cmdconfig = BasicStep {
             entry: "bash -c".into(),

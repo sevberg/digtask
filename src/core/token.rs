@@ -66,7 +66,8 @@ fn evaluate_tokens(input: &str, vars: &VariableSet) -> Result<JsonValue> {
         0 => JsonValue::Null,
         1 => match elements.pop().unwrap() {
             ParsedElement::Token(key) => vars.get(key)?.clone(),
-            ParsedElement::Literal(value) => JsonValue::String(value.to_string()),
+            ParsedElement::Literal(value) => serde_json::from_str::<JsonValue>(value)
+                .unwrap_or_else(|_| JsonValue::String(value.to_string())),
         },
         _ => {
             // Build output string stack

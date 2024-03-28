@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::core::{
-    common::default_false, executor::DigExecutor, run_context::RunContext, vars::VariableSet,
+    common::default_false, executor::DigExecutor, gate::RunGates, run_context::RunContext,
+    vars::VariableSet,
 };
 
 use super::{
@@ -22,7 +23,7 @@ pub struct BashStep {
     pub bash: String,
     pub env: Option<HashMap<String, String>>,
     pub dir: Option<String>,
-    pub r#if: Option<Vec<String>>,
+    pub r#if: Option<RunGates>,
     pub store: Option<String>,
     #[serde(default = "default_false")]
     pub silent: bool,
