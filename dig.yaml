@@ -47,20 +47,23 @@ tasks:
     label: "analyze_country_{{iso3}}"
     vars:
       iso3: GRB
-    presteps:
+    pre-steps:
       - parallel:
           - "sleep 1"
           - task: prepare_country
     steps:
       - 'echo "ANALYZING: {{iso3}}"'
+    post-steps:
+      on-fail:
+        - 'echo "Oh no, I failed!"'
+      on-success:
+        - 'echo "Joy! I succeeded!"'
+      finally:
+        - 'echo "Cleaning up: {{iso3}}"'
     if:
       - "1 = 1"
     unless:
-      - "\"1\" = \"1\""
-    poststeps:
-      - bash: 'echo "Cleaning up: {{iso3}}"'
-        if:
-          - "{{SUCCESS}} = false"
+      - "\"1\" = \"2\""
 
   analyze_all:
     steps:

@@ -39,11 +39,27 @@ fn task_log_bad(label: &str, message: &str) {
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(rename_all = "kebab-case")]
+pub struct TaskPostStepsSpecifiedConfig {
+    pub on_success: Option<Vec<StepConfig>>,
+    pub on_fail: Option<Vec<StepConfig>>,
+    pub finally: Option<Vec<StepConfig>>,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(untagged)]
+pub enum TaskPostStepsConfig {
+    Unspecified(Option<Vec<StepConfig>>),
+    Specified(TaskPostStepsSpecifiedConfig),
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "kebab-case")]
 pub struct TaskConfig {
     pub label: Option<String>,
-    pub presteps: Option<Vec<StepConfig>>,
+    pub pre_steps: Option<Vec<StepConfig>>,
     pub steps: Vec<StepConfig>,
-    pub poststeps: Option<Vec<StepConfig>>,
+    pub post_steps: Option<TaskPostStepsConfig>,
     pub inputs: Option<Vec<String>>,
     pub outputs: Option<Vec<String>>,
     pub r#if: Option<RunGates>,
@@ -58,6 +74,25 @@ pub struct TaskConfig {
 }
 
 impl TaskConfig {
+    #[allow(dead_code)]
+    pub fn default() -> Self {
+        TaskConfig {
+            label: None,
+            pre_steps: None,
+            steps: Vec::new(),
+            post_steps: None,
+            inputs: None,
+            outputs: None,
+            r#if: None,
+            unless: None,
+            silent: false,
+            vars: None,
+            forcing: ForcingBehaviour::Inherit,
+            env: None,
+            dir: None,
+        }
+    }
+
     pub async fn prepare(
         &self,
         default_label: &str,
@@ -230,11 +265,11 @@ impl TaskConfig {
         }
 
         // Evaluate Dependencies
-        let pretest_outputs = match &self.presteps {
-            Some(presteps) => {
+        let pre_step_outputs = match &self.pre_steps {
+            Some(pre_steps) => {
                 task_log(&data.label, "Evaluating Dependencies");
 
-                self.evaluate_steps(presteps, &mut data, config, capture_output, executor)
+                self.evaluate_steps(pre_steps, &mut data, config, capture_output, executor)
                     .await?
             }
             None => Vec::new(),
@@ -263,29 +298,29 @@ impl TaskConfig {
         match step_outputs {
             Ok(_) => data.vars.insert("SUCCESS".to_string(), json!(true)),
             Err(_) => data.vars.insert("SUCCESS".to_string(), json!(false)),
-        }
-
-        // Evaluate post-steps
-        let poststep_outputs = match &self.poststeps {
-            Some(poststeps) => {
-                task_log(&data.label, "Evaluating post-steps");
-
-                self.evaluate_steps(poststeps, &mut data, config, capture_output, executor)
-                    .await
-            }
-            None => Ok(Vec::new()),
         };
 
+        // Evaluate post-steps
+        let post_step_outputs = self
+            .evaluate_post_steps(
+                step_outputs.is_ok(),
+                &mut data,
+                config,
+                capture_output,
+                executor,
+            )
+            .await;
+
         // Handle errors
-        let (step_outputs, poststep_outputs) = match step_outputs {
-            Ok(step_outputs) => match poststep_outputs {
-                Ok(poststep_outputs) => (step_outputs, poststep_outputs),
+        let (step_outputs, post_step_outputs) = match step_outputs {
+            Ok(step_outputs) => match post_step_outputs {
+                Ok(post_step_outputs) => (step_outputs, post_step_outputs),
                 Err(poststep_error) => {
                     task_log_bad(&data.label, "Task succeeded, but post-steps failed");
                     return Err(poststep_error);
                 }
             },
-            Err(step_error) => match poststep_outputs {
+            Err(step_error) => match post_step_outputs {
                 Ok(_) => {
                     task_log_bad(&data.label, "Task failed");
                     return Err(step_error);
@@ -309,11 +344,61 @@ impl TaskConfig {
         // Finalize
         match capture_output {
             true => {
-                let outputs = [pretest_outputs, step_outputs, poststep_outputs].concat();
+                let outputs = [pre_step_outputs, step_outputs, post_step_outputs].concat();
                 Ok(Some(outputs))
             }
             false => Ok(None),
         }
+    }
+
+    async fn evaluate_post_steps(
+        &self,
+        task_succeeded: bool,
+        data: &mut TaskEvaluationData,
+        config: &DigConfig,
+        capture_output: bool,
+        executor: &DigExecutor<'_>,
+    ) -> Result<Vec<String>> {
+        let mut outputs = Vec::new();
+
+        if let Some(post_steps) = &self.post_steps {
+            let (initial_post_steps, initial_label, final_post_steps) = match post_steps {
+                TaskPostStepsConfig::Unspecified(steps) => (None, "none", steps.as_ref()),
+                TaskPostStepsConfig::Specified(specified_post_steps) => match task_succeeded {
+                    true => (
+                        specified_post_steps.on_success.as_ref(),
+                        "on-success",
+                        specified_post_steps.finally.as_ref(),
+                    ),
+                    false => (
+                        specified_post_steps.on_fail.as_ref(),
+                        "on-fail",
+                        specified_post_steps.finally.as_ref(),
+                    ),
+                },
+            };
+
+            if let Some(initial_post_steps) = initial_post_steps {
+                task_log(
+                    &data.label,
+                    format!("Evaluating {} post steps", initial_label).as_str(),
+                );
+                let _outputs = self
+                    .evaluate_steps(initial_post_steps, data, config, capture_output, executor)
+                    .await?;
+                outputs.extend(_outputs.into_iter());
+            }
+
+            task_log(&data.label, "Evaluating final post-steps");
+            if let Some(final_post_steps) = final_post_steps {
+                let _outputs = self
+                    .evaluate_steps(final_post_steps, data, config, capture_output, executor)
+                    .await?;
+                outputs.extend(_outputs.into_iter());
+            }
+        }
+
+        Ok(outputs)
     }
 
     async fn evaluate_steps(
@@ -463,29 +548,19 @@ mod tests {
     fn _make_task_prepare_country() -> TaskConfig {
         TaskConfig {
             label: Some("prepare_country".into()),
-            presteps: None,
             steps: vec!["echo PREPARING: {{iso3}}".into()],
-            poststeps: None,
-            inputs: None,
-            outputs: None,
-            r#if: None,
-            unless: None,
-            silent: false,
             vars: Some(
                 vec![("iso3".to_string(), RawVariable::Json("DEU".into()))]
                     .into_iter()
                     .collect(),
             ),
-            forcing: ForcingBehaviour::Inherit,
-            env: None,
-            dir: None,
+            ..TaskConfig::default()
         }
     }
 
     fn _make_task_analyze_country() -> TaskConfig {
         TaskConfig {
             label: Some("analyze_country".into()),
-            presteps: None,
             steps: vec![
                 StepConfig::Single(SingularStepConfig::Task(TaskStepConfig {
                     task: "prepare_country".into(),
@@ -500,27 +575,18 @@ mod tests {
                     "echo ANALYZING: {{iso3}}".into(),
                 )),
             ],
-            poststeps: None,
-            inputs: None,
-            outputs: None,
-            r#if: None,
-            unless: None,
-            silent: true,
             vars: Some(
                 vec![("iso3".to_string(), RawVariable::Json("GBR".into()))]
                     .into_iter()
                     .collect(),
             ),
-            forcing: ForcingBehaviour::Inherit,
-            env: None,
-            dir: None,
+            ..TaskConfig::default()
         }
     }
 
     fn _make_task_analyze_all_countries() -> TaskConfig {
         TaskConfig {
             label: Some("analyze_all_countries".into()),
-            presteps: None,
             steps: vec![StepConfig::Single(SingularStepConfig::Task(
                 TaskStepConfig {
                     task: "analyze_country".into(),
@@ -536,16 +602,8 @@ mod tests {
                     silent: false,
                 },
             ))],
-            poststeps: None,
-            inputs: None,
-            outputs: None,
-            r#if: None,
-            unless: None,
             silent: true,
-            vars: None,
-            forcing: ForcingBehaviour::Inherit,
-            env: None,
-            dir: None,
+            ..TaskConfig::default()
         }
     }
 
@@ -661,26 +719,20 @@ mod tests {
 
         let task = TaskConfig {
             label: Some("dir_env".into()),
-            presteps: None,
             steps: vec!["echo \"I am the ${SOME_ENV}\"".into(), "pwd".into()],
-            poststeps: None,
-            inputs: None,
-            outputs: None,
-            r#if: None,
-            unless: None,
             silent: true,
             vars: Some(
                 vec![("iso3".to_string(), RawVariable::Json("DEU".into()))]
                     .into_iter()
                     .collect(),
             ),
-            forcing: ForcingBehaviour::Inherit,
             env: Some(
                 vec![("SOME_ENV".to_string(), "{{NAME}}".into())]
                     .into_iter()
                     .collect(),
             ),
             dir: Some("/".into()),
+            ..TaskConfig::default()
         };
 
         let context = RunContext::default();
