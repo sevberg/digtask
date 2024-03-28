@@ -41,7 +41,7 @@ tasks:
     #   - data/input_{{iso3}}.csv
     outputs:
       - data/prepared_{{iso3}}-{{NAME}}.output
-    forcing: Inherit
+    forcing: inherit
 
   analyze_country:
     label: "analyze_country_{{iso3}}"

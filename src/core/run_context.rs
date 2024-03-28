@@ -17,6 +17,7 @@ pub enum ForcingContext {
 }
 
 #[derive(Deserialize, Debug, Clone, Copy)]
+#[serde(rename_all = "kebab-case")]
 pub enum ForcingBehaviour {
     Never,
     Always,
