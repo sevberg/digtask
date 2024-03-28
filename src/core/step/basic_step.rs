@@ -14,6 +14,8 @@ use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::borrow::BorrowMut;
 
+use super::common::CommandConfigMethods;
+
 fn default_command_entry() -> String {
     "bash -c".into()
 }
@@ -87,6 +89,28 @@ impl BasicStep {
         // Return
         let string_rep = string_rep.join(" ");
         Ok((command, string_rep))
+    }
+}
+
+impl CommandConfigMethods for BasicStep {
+    fn ensure_not_a_command(obj: &serde_json::Value) -> Result<()> {
+        if let serde_json::Value::Object(data) = &obj {
+            if data.contains_key("cmd") {
+                let error = match serde_json::from_str::<BasicStep>(
+                    serde_json::to_string(obj)?.as_ref(),
+                ) {
+                    Ok(_) => panic!("We expected the object to fail casting as a BasicStepConfig. Why did it succeed??"),
+                    Err(error) => Err(anyhow!(
+                        "Expected '{}' to be a BasicStepConfig, but encountered the error '{}'",
+                        obj.to_string(),
+                        error.to_string()
+                    ))
+                };
+
+                return error;
+            }
+        }
+        Ok(())
     }
 }
 

@@ -12,6 +12,8 @@ use serde_json::Value as JsonValue;
 use std::collections::HashMap as Map;
 use std::rc::Rc;
 
+use super::step::common::CommandConfigMethods;
+
 pub type VariableMap = Map<String, JsonValue>;
 pub type VariableMapStack = Vec<Rc<VariableMap>>;
 
@@ -145,7 +147,11 @@ impl RawVariable {
         executor: &DigExecutor<'_>,
     ) -> Result<JsonValue> {
         let output = match &self {
-            RawVariable::Json(json_value) => json_value.evaluate_tokens(vars)?,
+            RawVariable::Json(json_value) => {
+                let json_value = json_value.evaluate_tokens(vars)?;
+                CommandConfig::ensure_not_a_command(&json_value)?;
+                json_value
+            }
             RawVariable::Executable(command) => {
                 match command.evaluate(0, vars, context, executor).await? {
                     StepEvaluationResult::Completed(str_val) => {

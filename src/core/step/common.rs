@@ -110,6 +110,21 @@ pub enum CommandConfig {
     Python(PythonStep),
 }
 
+pub trait CommandConfigMethods {
+    fn ensure_not_a_command(obj: &serde_json::Value) -> Result<()>;
+}
+
+impl CommandConfigMethods for CommandConfig {
+    fn ensure_not_a_command(obj: &serde_json::Value) -> Result<()> {
+        if let serde_json::Value::Object(_) = obj {
+            BasicStep::ensure_not_a_command(obj)?;
+            BashStep::ensure_not_a_command(obj)?;
+            PythonStep::ensure_not_a_command(obj)?;
+        }
+        Ok(())
+    }
+}
+
 impl StepMethods for CommandConfig {
     fn get_store(&self) -> Option<&String> {
         match &self {

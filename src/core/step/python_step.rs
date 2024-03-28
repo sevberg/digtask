@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -12,6 +12,8 @@ use crate::core::{
     },
     vars::VariableSet,
 };
+
+use super::common::CommandConfigMethods;
 
 fn default_executable() -> String {
     "python3".into()
@@ -91,6 +93,28 @@ impl PythonStep {
     #[allow(dead_code)]
     pub fn default() -> Self {
         PythonStep::new("print(\"Hello World\")")
+    }
+}
+
+impl CommandConfigMethods for PythonStep {
+    fn ensure_not_a_command(obj: &serde_json::Value) -> Result<()> {
+        if let serde_json::Value::Object(data) = &obj {
+            if data.contains_key("py") {
+                let error = match serde_json::from_str::<PythonStep>(
+                    serde_json::to_string(obj)?.as_ref(),
+                ) {
+                    Ok(_) => panic!("We expected the object to fail casting as a PythonStepConfig. Why did it succeed??"),
+                    Err(error) => Err(anyhow!(
+                        "Expected '{}' to be a PythonStepConfig, but encountered the error '{}'",
+                        obj.to_string(),
+                        error.to_string()
+                    ))
+                };
+
+                return error;
+            }
+        }
+        Ok(())
     }
 }
 

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -8,7 +8,7 @@ use crate::core::{
 
 use super::{
     basic_step::{BasicStep, RawCommandEntry},
-    common::{StepEvaluationResult, StepMethods},
+    common::{CommandConfigMethods, StepEvaluationResult, StepMethods},
 };
 
 fn default_executable() -> String {
@@ -39,6 +39,28 @@ impl BashStep {
             store: None,
             silent: false,
         }
+    }
+}
+
+impl CommandConfigMethods for BashStep {
+    fn ensure_not_a_command(obj: &serde_json::Value) -> Result<()> {
+        if let serde_json::Value::Object(data) = &obj {
+            if data.contains_key("bash") {
+                let error = match serde_json::from_str::<BashStep>(
+                    serde_json::to_string(obj)?.as_ref(),
+                ) {
+                    Ok(_) => panic!("We expected the object to fail casting as a BashStepConfig. Why did it succeed??"),
+                    Err(error) => Err(anyhow!(
+                        "Expected '{}' to be a BashStepConfig, but encountered the error '{}'",
+                        obj.to_string(),
+                        error.to_string()
+                    ))
+                };
+
+                return error;
+            }
+        }
+        Ok(())
     }
 }
 
