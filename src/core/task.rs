@@ -222,7 +222,10 @@ impl TaskConfig {
     ) -> Result<Option<Vec<String>>> {
         // Check for Canceling
         if let Some(t) = self.test_cancel(&data, executor).await? {
-            task_log(&data.label, format!("Canceled: {}", t.reason).as_ref());
+            task_log(
+                &data.label,
+                format!("Canceled because {}", t.reason).as_ref(),
+            );
             return Err(anyhow!("Task {} canceled", data.label));
         }
 
@@ -242,7 +245,10 @@ impl TaskConfig {
             match &data.context.is_forced() {
                 true => task_log(&data.label, "Forced"),
                 false => {
-                    task_log(&data.label, format!("Skipped: {}", t.reason).as_ref());
+                    task_log(
+                        &data.label,
+                        format!("Skipped because {}", t.reason).as_ref(),
+                    );
                     return Ok(None);
                 }
             }
