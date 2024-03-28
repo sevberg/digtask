@@ -133,7 +133,7 @@ impl VariableSet {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum RawVariable {
-    Executable(CommandConfig),
+    Executable(Box<CommandConfig>),
     Json(JsonValue),
 }
 
@@ -252,7 +252,9 @@ mod test {
         rawvars.insert("fixed_key".into(), RawVariable::Json(json!["dyn_key"]));
         rawvars.insert(
             "{{fixed_key}}".into(),
-            RawVariable::Executable(CommandConfig::Python(PythonStep::new("print(\"19\")"))),
+            RawVariable::Executable(Box::new(CommandConfig::Python(PythonStep::new(
+                "print(\"19\")",
+            )))),
         );
 
         // Stack raw variables

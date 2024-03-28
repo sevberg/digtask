@@ -19,6 +19,7 @@ vars:
       import math
       import json
       print(json.dumps({ "{{NAME}}": math.sqrt( {{NUM}} )}))
+    type: inline
     # type:
     #   conda: base
     #   type: inline
