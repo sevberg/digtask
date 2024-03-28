@@ -6,6 +6,7 @@ use crate::core::{
 };
 
 use anyhow::{anyhow, bail, Result};
+use colored::Colorize;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -104,6 +105,10 @@ impl VariableSet {
         let mut output_vars = self.stack(stack_mode);
 
         for (keytoken, rawvalue) in raw_vars.iter() {
+            // println!("{}", keytoken.red());
+            // dbg!(rawvalue);
+            // println!("{}", serde_json::to_string(rawvalue)?.green());
+
             let keyvalue: Option<(String, JsonValue)> = {
                 match output_vars.get_from_parent(keytoken) {
                     Some(value) => match &stack_mode {
