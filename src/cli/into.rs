@@ -12,7 +12,7 @@ use crate::core::{
 /// Run a specific task
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
-pub struct RunArgs {
+pub struct IntoArgs {
     /// The config file to load
     #[arg(short, long, default_value = "dig.yaml")]
     source: String,
@@ -34,7 +34,7 @@ pub struct RunArgs {
 }
 
 async fn evaluate_main_task(
-    user_args: RunArgs,
+    user_args: IntoArgs,
     config: DigConfig,
     vars: VariableSet,
     executor: &DigExecutor<'_>,
@@ -71,7 +71,7 @@ async fn evaluate_main_task(
     Ok(())
 }
 
-pub fn main(args: RunArgs) -> Result<()> {
+pub fn main(args: IntoArgs) -> Result<()> {
     let config = DigConfig::load_yaml(&args.source)?;
 
     // handle overrides

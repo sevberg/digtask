@@ -1,10 +1,10 @@
 use clap::Subcommand;
 
-use self::run::RunArgs;
+use self::into::IntoArgs;
 
-pub mod run;
+pub mod into;
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    Run(RunArgs),
+    Into(IntoArgs),
 }

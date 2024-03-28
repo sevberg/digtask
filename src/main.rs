@@ -6,7 +6,7 @@ mod test;
 
 use anyhow::Result;
 use clap::Parser;
-use cli::run;
+use cli::into;
 
 use crate::cli::Commands;
 
@@ -22,6 +22,6 @@ fn main() -> Result<()> {
     let cli = MainArgs::parse();
 
     match cli.command {
-        Commands::Run(args) => run::main(args),
+        Commands::Into(args) => into::main(args),
     }
 }
