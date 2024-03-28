@@ -6,11 +6,22 @@ vars:
   NUM: 3
   NOW:
     bash: date
+  # CONDA_PY_VER:
+  #   py: --version
+  #   type:
+  #     conda: testenv
+  #     type: script
+  NATIVE_PY_VER:
+    py: --version
   SOME_NUM:
+    # silent: false
     py: |
       import math
       import json
       print(json.dumps({ "{{NAME}}": math.sqrt( {{NUM}} )}))
+    # type:
+    #   conda: base
+    #   type: inline
 
 tasks:
   prepare_country:

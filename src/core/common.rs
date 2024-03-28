@@ -20,3 +20,4 @@ pub fn contextualize_command(command: &mut Command, context: &RunContext) {
         }
     }
 }
+// pub static CONFIG_CASE: &str = "kebab-case";

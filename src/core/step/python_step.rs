@@ -17,7 +17,49 @@ fn default_executable() -> String {
     "python3".into()
 }
 
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PythonStepType {
+    Inline,
+    Script,
+}
+
+impl PythonStepType {
+    fn default() -> Self {
+        PythonStepType::Script
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct PythonStepTypeCondaConfig {
+    conda: String,
+    #[serde(default = "PythonStepType::default")]
+    pub r#type: PythonStepType,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct PythonStepTypeVenvConfig {
+    venv: String,
+    #[serde(default = "PythonStepType::default")]
+    pub r#type: PythonStepType,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum PythonStepTypeConfig {
+    Native(PythonStepType),
+    Conda(PythonStepTypeCondaConfig),
+    Venv(PythonStepTypeVenvConfig),
+}
+
+impl PythonStepTypeConfig {
+    fn default() -> Self {
+        PythonStepTypeConfig::Native(PythonStepType::default())
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case")]
 pub struct PythonStep {
     #[serde(default = "default_executable")]
     pub executable: String,
@@ -26,22 +68,29 @@ pub struct PythonStep {
     pub dir: Option<String>,
     pub r#if: Option<Vec<String>>,
     pub store: Option<String>,
+    #[serde(default = "PythonStepTypeConfig::default")]
+    pub r#type: PythonStepTypeConfig,
     #[serde(default = "default_false")]
     pub silent: bool,
 }
 
 impl PythonStep {
-    #[allow(dead_code)]
     pub fn new(command: &str) -> Self {
         PythonStep {
             executable: default_executable(),
             py: command.into(),
+            r#type: PythonStepTypeConfig::Native(PythonStepType::Inline),
             env: None,
             dir: None,
             r#if: None,
             store: None,
             silent: false,
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn default() -> Self {
+        PythonStep::new("print(\"Hello World\")")
     }
 }
 
@@ -56,10 +105,52 @@ impl StepMethods for PythonStep {
         context: &RunContext,
         executor: &DigExecutor<'_>,
     ) -> Result<StepEvaluationResult> {
-        // let executable = self.executable.evaluate(vars)?;
+        // println!("{}", format!("PY TYPE: {:?}", &self.r#type).red());
+
+        let (executable, cmd) = match &self.r#type {
+            PythonStepTypeConfig::Native(type_config) => {
+                let executable = match type_config {
+                    PythonStepType::Inline => format!("{} -c", self.executable),
+                    PythonStepType::Script => self.executable.clone(),
+                };
+                let cmd = self.py.clone();
+                (executable, RawCommandEntry::Single(cmd))
+            }
+            PythonStepTypeConfig::Conda(type_config) => {
+                let executable = "conda".to_string();
+                let mut cmd = vec![
+                    "run".to_string(),
+                    "-n".to_string(),
+                    type_config.conda.clone(),
+                    self.executable.clone(),
+                ];
+
+                match type_config.r#type {
+                    PythonStepType::Inline => {
+                        cmd.push("-c".to_string());
+                        cmd.push(self.py.clone());
+                    }
+                    PythonStepType::Script => cmd.push(self.py.clone()),
+                };
+                (executable, RawCommandEntry::Many(cmd))
+            }
+            PythonStepTypeConfig::Venv(type_config) => {
+                let executable = "bash -c".to_string();
+                let cmd_head = format!(
+                    "source {}/bin/activate && {}",
+                    type_config.venv, self.executable
+                );
+                let cmd = match type_config.r#type {
+                    PythonStepType::Inline => format!("{} -c {}", cmd_head, self.py),
+                    PythonStepType::Script => format!("{} {}", cmd_head, self.py),
+                };
+                (executable, RawCommandEntry::Single(cmd))
+            }
+        };
+
         BasicStep {
-            entry: format!("{} -c", self.executable),
-            cmd: RawCommandEntry::Single(self.py.clone()),
+            entry: executable,
+            cmd,
             env: self.env.clone(),
             dir: self.dir.clone(),
             r#if: self.r#if.clone(),
@@ -88,11 +179,8 @@ mod test {
         let command_config = PythonStep {
             executable: "python3".into(),
             py: "\nimport math\nprint(math.sqrt( {{SOME_NUM}} ))".into(),
-            env: None,
-            dir: None,
-            r#if: None,
-            store: None,
-            silent: false,
+            r#type: PythonStepTypeConfig::Native(PythonStepType::Inline),
+            ..PythonStep::default()
         };
         let context = RunContext::default();
 
